@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/0xCHANDA/womm/internal/core"
 )
 
 func TestParseValid(t *testing.T) {
@@ -171,6 +173,14 @@ environment:
 		if !strings.Contains(w, "unknown key") {
 			t.Errorf("warning %q does not mention unknown key", w)
 		}
+		// Must not promise preservation: yaml.v3 decode into known
+		// structs drops unknown fields.
+		if strings.Contains(w, "keeping") {
+			t.Errorf("warning %q falsely claims preservation", w)
+		}
+		if !strings.Contains(w, "ignored; warning only") {
+			t.Errorf("warning %q does not state ignored semantics", w)
+		}
 	}
 	// warnings must include links per section
 	found := map[string]bool{}
@@ -187,18 +197,78 @@ environment:
 }
 
 func TestVersionErrorPolicy(t *testing.T) {
-	// Unknown future version must be an error of the ErrVersion family,
-	// not silently accepted and not a generic failure.
-	_, _, err := Parse([]byte("version: 99\n"))
-	var ve *versionError
-	if err == nil || !errors.As(err, &ve) {
-		t.Fatalf("expected *versionError, got %v", err)
+	// Every version-policy violation belongs to the ErrVersion family
+	// discoverable via errors.Is: missing, non-integer, too old, too
+	// future. WOMM never verifies silently against an unknown schema.
+	cases := []struct {
+		name     string
+		yaml     string
+		wantText string
+	}{
+		{"future version", "version: 99\n", "Please upgrade womm"},
+		{"future version", "version: 99\n", "Please upgrade womm"},
+		{"obsolete version", "version: 0\n", "obsolete schema version 0"},
+		{"missing version", "requirements: []\n", "no version field"},
+		{"non integer version", "version: \"one\"\n", "must be an integer"},
 	}
-	if ve.got != 99 {
-		t.Errorf("versionError.got = %d, want 99", ve.got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := Parse([]byte(tc.yaml))
+			if err == nil {
+				t.Fatalf("expected ErrVersion-family error, got nil")
+			}
+			if !errors.Is(err, ErrVersion) {
+				t.Errorf("errors.Is(err, ErrVersion) = false for %v", err)
+			}
+			var ve *versionError
+			if !errors.As(err, &ve) {
+				t.Errorf("expected *versionError, got %T", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantText) {
+				t.Errorf("error = %q, want containing %q", err.Error(), tc.wantText)
+			}
+			// Obsolete documents must never get the "upgrade womm"
+			// hint: the file is wrong, not the binary ancient.
+			if tc.name == "obsolete version" && strings.Contains(err.Error(), "Please upgrade womm") {
+				t.Errorf("obsolete error must not suggest upgrading womm: %v", err)
+			}
+		})
 	}
-	if !strings.Contains(err.Error(), "Please upgrade womm") {
-		t.Errorf("error must tell the user to upgrade: %v", err)
+}
+
+func TestParseProducesCanonicalCoreModel(t *testing.T) {
+	// schema is persistence plumbing on top of internal/core: parsed
+	// requirements must BE core.Requirement values, not a parallel
+	// domain model. A future detector returns core.Requirement
+	// directly into schema without conversion.
+	y := `
+version: 1
+requirements:
+  - name: node
+    constraint: ">=22 <25"
+    evidence:
+      - source: package.json
+        field: engines.node
+        value: ">=22"
+`
+	f, warnings, err := Parse([]byte(y))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("unexpected warnings: %v", warnings)
+	}
+	if got := len(f.Requirements); got != 1 {
+		t.Fatalf("got %d requirements, want 1", got)
+	}
+	var req core.Requirement = f.Requirements[0] // compile-time type identity
+	if req.Name != "node" || req.Constraint != ">=22 <25" {
+		t.Errorf("unexpected requirement: %+v", req)
+	}
+	// core.Evidence survives YAML parsing with field values intact.
+	want := core.Evidence{Source: "package.json", Field: "engines.node", Value: ">=22"}
+	if len(req.Evidence) != 1 || req.Evidence[0] != want {
+		t.Errorf("evidence = %+v, want %+v", req.Evidence, []core.Evidence{want})
 	}
 }
 

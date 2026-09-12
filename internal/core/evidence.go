@@ -4,9 +4,9 @@ package core
 // file and field that justifies it.
 type Evidence struct {
 	// Relative path of the source file ("package.json").
-	Source string
+	Source string `yaml:"source"`
 	// Field path inside the source ("engines.node").
-	Field string
+	Field string `yaml:"field"`
 	// Literal value declared by the field (">=22").
-	Value string
+	Value string `yaml:"value"`
 }

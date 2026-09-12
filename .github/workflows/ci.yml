@@ -8,6 +8,10 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    # Applies to every Go command in this job: no silent toolchain
+    # upgrade anywhere, not just in the version check.
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
 
@@ -19,18 +23,27 @@ jobs:
         run: |
           out=$(gofmt -l .)
           if [ -n "$out" ]; then
-            echo "not gofed:"
+            echo "not gofmt'd:"
             echo "$out"
             exit 1
           fi
 
+      - name: enforce Go 1.24 baseline (no silent toolchain upgrade)
+        run: |
+          actual=$(go env GOVERSION)
+          echo "toolchain: $actual"
+          case "$actual" in
+            go1.24.*) ;;
+            *) echo "expected go1.24 toolchain, got $actual"; exit 1 ;;
+          esac
+
       - name: go mod tidy reproducibility
         run: |
           cp go.mod go.mod.bak
-          if command -v go >/dev/null 2>&1; then
-            go mod tidy
-            diff go.mod go.mod.bak && rm -f go.mod.bak || { echo "go.mod drifted"; exit 1; }
-          fi
+          cp go.sum go.sum.bak
+          go mod tidy
+          diff go.mod go.mod.bak && diff go.sum go.sum.bak && rm -f go.mod.bak go.sum.bak \
+            || { echo "go.mod/go.sum drifted"; exit 1; }
 
       - name: go vet
         run: go vet ./...
