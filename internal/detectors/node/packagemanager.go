@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
+
 	"github.com/0xCHANDA/womm/internal/core"
 )
 
@@ -23,35 +25,41 @@ var packageManagerNames = map[string]bool{
 // pnpm-lock.yaml, yarn.lock) are NOT evidence at this stage —
 // explicit evidence only.
 //
-// "pnpm@10.15.1" produces:
+// Accepted shapes:
 //
-//	name: pnpm
-//	constraint: 10.15.1
-//	evidence:
-//	  source: package.json
-//	  field: packageManager
-//	  value: pnpm@10.15.1   (literal, preserved verbatim)
+//	npm@11.2.0          → Requirement{npm, 11.2.0}
+//	pnpm@10.15.1        → Requirement{pnpm, 10.15.1}
+//	yarn@3.2.3+sha224.… → Requirement{yarn, 3.2.3}   (Corepack hash
+//	                      is integrity metadata, not the runtime
+//	                      version; Evidence.Value keeps the FULL
+//	                      literal)
+//
+// Rejected with explicit errors:
+//
+//	pnpm@garbage, yarn@ (empty), npm@latest (ranges/tags not machine-
+//	comparable yet), corepack@… (unsupported name), yarn@https://…
+//	(Corepack URLs unsupported).
 type PackageManagerDetector struct{}
 
 func NewPackageManagerDetector() PackageManagerDetector { return PackageManagerDetector{} }
 
 func (PackageManagerDetector) Name() string { return "package-manager" }
 
-func (d PackageManagerDetector) Detect(_ context.Context, projectRoot string) ([]core.Requirement, error) {
-	pkgPath := filepath.Join(projectRoot, "package.json")
-	pkgData, hasPkg, err := readFileIfPresent(pkgPath)
+func (PackageManagerDetector) Detect(_ context.Context, projectRoot string) ([]core.Requirement, error) {
+	path := filepath.Join(projectRoot, "package.json")
+	pkgData, hasPkg, err := readFileIfPresent(projectRoot, "package.json")
 	if err != nil {
 		return nil, err
 	}
 	if !hasPkg {
-		// Without package.json there is no explicit package package
-		// manager evidence. Lockfile-only projects are not covered
-		// yet (inference absent by design).
+		// Without package.json there is no explicit package manager
+		// evidence. Lockfile-only projects are not covered yet
+		// (inference absent by design).
 		return []core.Requirement{}, nil
 	}
 	var pkg packageJSON
 	if err := json.Unmarshal(pkgData, &pkg); err != nil {
-		return nil, fmt.Errorf("%s: malformed package.json (declared source, cannot be interpreted safely): %w", pkgPath, err)
+		return nil, fmt.Errorf("%s: malformed package.json (declared source, cannot be interpreted safely): %w", path, err)
 	}
 	pm := strings.TrimSpace(pkg.PackageManager)
 	if pm == "" {
@@ -68,15 +76,26 @@ func (d PackageManagerDetector) Detect(_ context.Context, projectRoot string) ([
 		Evidence: []core.Evidence{{
 			Source: "package.json",
 			Field:  "packageManager",
-			Value:  pm,
+			Value:  pm, // verbatim, including any +sha hash
 		}},
 	}}, nil
 }
 
-// splitPackageManager parses "<name>@<version>". Scoped names are
-// unsupported at this stage; unknown names produce an explicit
-// unsupported error because they cannot be justified as requirements.
+// splitPackageManager parses "<name>@<version>" and validates the
+// version as an exact machine-comparable version.
+//
+//   - Ranges and tags are rejected: packageManager declares a pinned
+//     toolchain version, not a selectable range. ("npm@latest",
+//     "pnpm@garbage", "yarn@")
+//   - Corepack integrity hashes ("+sha…") are scaffolding for the
+//     artifact, not part of the runtime version: the hash is stripped
+//     from the returned constraint while the caller keeps the full
+//     literal as Evidence.Value.
+//   - Corepack URLs (yarn@https://…) are unsupported at this stage.
 func splitPackageManager(pm string) (string, string, error) {
+	if strings.Contains(pm, "://") {
+		return "", "", fmt.Errorf("corepack URLs are not supported by WOMM v0.0.1")
+	}
 	name, version, ok := strings.Cut(pm, "@")
 	if !ok || name == "" || version == "" {
 		return "", "", fmt.Errorf("invalid format: expected \"<name>@<version>\" (npm/pnpm/yarn)")
@@ -84,5 +103,17 @@ func splitPackageManager(pm string) (string, string, error) {
 	if !packageManagerNames[name] {
 		return "", "", fmt.Errorf("unsupported package manager %q (supported: npm, pnpm, yarn)", name)
 	}
-	return name, version, nil
+	// Strip Corepack integrity hash; validate what remains as an
+	// exact version.
+	base := version
+	if plus := strings.Index(version, "+"); plus >= 0 {
+		base = version[:plus]
+	}
+	v, err := semver.NewVersion(base)
+	if err != nil {
+		return "", "", fmt.Errorf("version %q must be an exact version (ranges and tags are not accepted); expected \"<name>@<version>\"", version)
+	}
+	// The constraint is the pin WOMM can verify on a machine; canonical
+	// form of the base version keeps determinism.
+	return name, v.String(), nil
 }
