@@ -10,3 +10,8 @@ import (
 func writeFile(dir, name, content string) error {
 	return os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644)
 }
+
+// osSymlink is the test helper for symlink containment cases.
+func osSymlink(target, link string) error {
+	return os.Symlink(target, link)
+}
