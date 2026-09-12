@@ -5,9 +5,10 @@ import (
 	"fmt"
 )
 
-// ErrVersion represents version-policy violations: missing, future or
-// past schema version. Errors (never warnings): WOMM must never verify
-// silently against a schema it does not understand.
+// ErrVersion identifies the family of version-policy violations:
+// missing, non-integer, past or future schema version. Errors (never
+// warnings): WOMM must never verify silently against a schema it does
+// not understand.
 var ErrVersion = errors.New("unsupported womm.yaml schema version")
 
 // validate enforces the v1 contract. A requirement without explicit
@@ -54,7 +55,7 @@ func Validate(f *File) error {
 		return errors.New("nil womm.yaml file")
 	}
 	if !SupportedVersions()[f.Version] {
-		return &versionError{got: f.Version, present: true}
+		return &versionError{present: true, stated: fmt.Sprintf("%d", f.Version)}
 	}
 	return validate(f)
 }

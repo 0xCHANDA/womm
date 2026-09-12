@@ -62,7 +62,8 @@ func Parse(data []byte) (*File, []string, error) {
 }
 
 // extractVersion inspects the document root and enforces the version
-// compatibility policy exactly.
+// compatibility policy exactly. Every failure here belongs to the
+// ErrVersion family (see versionError.Unwrap).
 func extractVersion(root *yaml.Node) (int, error) {
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		key, val := root.Content[i], root.Content[i+1]
@@ -71,12 +72,14 @@ func extractVersion(root *yaml.Node) (int, error) {
 		}
 		v, err := strconv.Atoi(strings.TrimSpace(val.Value))
 		if err != nil {
-			return 0, fmt.Errorf("womm.yaml version must be an integer, got %q", val.Value)
+			// A stated, non-integer version is a version violation
+			// too: it belongs to the ErrVersion family.
+			return 0, &versionError{present: true, stated: ""}
 		}
 		if v != Version {
 			// v > 1 → unknown future schema; v < 1 → invalid. Same
 			// exit code semantics (error), distinct messages.
-			return 0, &versionError{got: v, present: true}
+			return 0, &versionError{present: true, stated: val.Value}
 		}
 		return v, nil
 	}
@@ -103,7 +106,7 @@ func checkUnknownKeys(root *yaml.Node) []string {
 			k := node.Content[i].Value
 			if !allowed[k] {
 				warnings = append(warnings, fmt.Sprintf(
-					"unknown key %q inside %s (keeping it, warning only)", k, where))
+					"unknown key %q inside %s (ignored; warning only)", k, where))
 			}
 		}
 	}

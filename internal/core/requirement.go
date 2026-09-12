@@ -10,11 +10,11 @@ package core
 // for a project, together with the evidence that backs it.
 type Requirement struct {
 	// Identifier of the requirement ("node", "pnpm", "postgres").
-	Name string
+	Name string `yaml:"name"`
 	// Version constraint: a semver range (">=22 <25") or the sentinel
 	// "present" (must exist, any version).
-	Constraint string
+	Constraint string `yaml:"constraint"`
 	// Explicit project evidence backing the requirement. A requirement
 	// without evidence is invalid (evidence over assumptions).
-	Evidence []Evidence
+	Evidence []Evidence `yaml:"evidence"`
 }

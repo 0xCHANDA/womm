@@ -1,6 +1,11 @@
 // Package schema loads and validates the portable womm.yaml
 // specification (schema v1).
 //
+// schema is persistence/serialization infrastructure on top of the
+// canonical domain model (internal/core): requirements parsed from
+// YAML surface as core.Requirement values, so detectors and the schema
+// loader share one model without adapters.
+//
 // Compatibility policy (see womm.yaml Schema v1 note):
 //
 //	version == 1      → supported.
@@ -8,13 +13,17 @@
 //	                    unknown schema.
 //	version <  1      → error.
 //	version missing   → error.
-//	unknown v1 keys   → warning, not error.
+//	unknown v1 keys   → warning, not error (not preserved, not stored).
 //
-// EVIDENCE_CONFLICT detection belongs to the capture flow of a later
-// PR; never to --force, which only overwrites an existing womm.yaml.
+// EVIDENCE_CONFLICT detection belongs to a later capture flow, never
+// to --force, which only overwrites an existing womm.yaml.
 package schema
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/0xCHANDA/womm/internal/core"
+)
 
 // Version is the supported womm.yaml schema version.
 const Version = 1
@@ -22,23 +31,9 @@ const Version = 1
 // File is the in-memory representation of a valid womm.yaml.
 type File struct {
 	Version      int
-	Requirements []Requirement
+	Requirements []core.Requirement
 	Services     map[string]Service
 	Environment  Environment
-}
-
-// Requirement mirrors schema v1 requirements entries.
-type Requirement struct {
-	Name       string
-	Constraint string
-	Evidence   []Evidence
-}
-
-// Evidence mirrors schema v1 evidence entries.
-type Evidence struct {
-	Source string
-	Field  string
-	Value  string
 }
 
 // Service mirrors schema v1 services entries.
@@ -59,14 +54,25 @@ func SupportedVersions() map[int]bool {
 	return map[int]bool{1: true}
 }
 
+// versionError belongs to the ErrVersion family: every version-policy
+// violation (missing, non-integer, too old, too future) unwraps to it
+// so callers can check errors.Is(err, schema.ErrVersion).
 type versionError struct {
-	got     int
+	// present is false when the version key itself is absent.
 	present bool
+	// stated is the literal version text the file declared, if any.
+	stated string
 }
 
 func (e *versionError) Error() string {
-	if e.present {
-		return fmt.Sprintf("womm.yaml uses schema version %d; this binary supports v%d. Please upgrade womm.", e.got, Version)
+	switch {
+	case !e.present:
+		return "womm.yaml has no version field"
+	case e.stated == "":
+		return "womm.yaml version must be an integer"
 	}
-	return "womm.yaml has no version field"
+	return fmt.Sprintf("womm.yaml uses schema version %s; this binary supports v%d. Please upgrade womm.", e.stated, Version)
 }
+
+// Unwrap ties every version violation to ErrVersion.
+func (e *versionError) Unwrap() error { return ErrVersion }
