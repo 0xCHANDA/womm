@@ -8,6 +8,10 @@ on:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    # Applies to every Go command in this job: no silent toolchain
+    # upgrade anywhere, not just in the version check.
+    env:
+      GOTOOLCHAIN: local
     steps:
       - uses: actions/checkout@v4
 
@@ -25,8 +29,6 @@ jobs:
           fi
 
       - name: enforce Go 1.24 baseline (no silent toolchain upgrade)
-        env:
-          GOTOOLCHAIN: local
         run: |
           actual=$(go env GOVERSION)
           echo "toolchain: $actual"

@@ -77,9 +77,11 @@ func extractVersion(root *yaml.Node) (int, error) {
 			return 0, &versionError{present: true, stated: ""}
 		}
 		if v != Version {
-			// v > 1 → unknown future schema; v < 1 → invalid. Same
-			// exit code semantics (error), distinct messages.
-			return 0, &versionError{present: true, stated: val.Value}
+			// v > 1 → unknown future schema ("upgrade womm");
+			// v < 1 → obsolete/invalid document. Same exit code
+			// semantics (error), distinct messages, same ErrVersion
+			// family.
+			return 0, &versionError{present: true, stated: val.Value, obsolete: v < 1}
 		}
 		return v, nil
 	}

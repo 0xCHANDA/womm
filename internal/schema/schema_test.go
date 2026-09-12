@@ -206,7 +206,8 @@ func TestVersionErrorPolicy(t *testing.T) {
 		wantText string
 	}{
 		{"future version", "version: 99\n", "Please upgrade womm"},
-		{"past version", "version: 0\n", "Please upgrade womm"},
+		{"future version", "version: 99\n", "Please upgrade womm"},
+		{"obsolete version", "version: 0\n", "obsolete schema version 0"},
 		{"missing version", "requirements: []\n", "no version field"},
 		{"non integer version", "version: \"one\"\n", "must be an integer"},
 	}
@@ -225,6 +226,11 @@ func TestVersionErrorPolicy(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantText) {
 				t.Errorf("error = %q, want containing %q", err.Error(), tc.wantText)
+			}
+			// Obsolete documents must never get the "upgrade womm"
+			// hint: the file is wrong, not the binary ancient.
+			if tc.name == "obsolete version" && strings.Contains(err.Error(), "Please upgrade womm") {
+				t.Errorf("obsolete error must not suggest upgrading womm: %v", err)
 			}
 		})
 	}

@@ -62,6 +62,10 @@ type versionError struct {
 	present bool
 	// stated is the literal version text the file declared, if any.
 	stated string
+	// obsolete marks a stated but invalid, too-old version (v < 1):
+	// the file is wrong, not "too old for this binary". No "upgrade
+	// womm" hint; the document itself violates schema v1.
+	obsolete bool
 }
 
 func (e *versionError) Error() string {
@@ -70,6 +74,8 @@ func (e *versionError) Error() string {
 		return "womm.yaml has no version field"
 	case e.stated == "":
 		return "womm.yaml version must be an integer"
+	case e.obsolete:
+		return fmt.Sprintf("womm.yaml uses obsolete schema version %s; this binary supports v%d and does not run on an invalid version.", e.stated, Version)
 	}
 	return fmt.Sprintf("womm.yaml uses schema version %s; this binary supports v%d. Please upgrade womm.", e.stated, Version)
 }

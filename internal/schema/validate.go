@@ -55,7 +55,7 @@ func Validate(f *File) error {
 		return errors.New("nil womm.yaml file")
 	}
 	if !SupportedVersions()[f.Version] {
-		return &versionError{present: true, stated: fmt.Sprintf("%d", f.Version)}
+		return &versionError{present: true, stated: fmt.Sprintf("%d", f.Version), obsolete: f.Version < 1}
 	}
 	return validate(f)
 }
