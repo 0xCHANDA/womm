@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
@@ -81,16 +82,32 @@ func (PackageManagerDetector) Detect(_ context.Context, projectRoot string) ([]c
 	}}, nil
 }
 
-// splitPackageManager parses "<name>@<version>" and validates the
-// version as an exact machine-comparable version.
+// corepackHash validates the Corepack integrity-hash suffix:
 //
-//   - Ranges and tags are rejected: packageManager declares a pinned
-//     toolchain version, not a selectable range. ("npm@latest",
-//     "pnpm@garbage", "yarn@")
+//	+sha<224|256|384|512>.<hex-digest>
+//
+// The algorithm set is the documented Corepack-compatible set (npm
+// SRI-style checksums; sha224 appears in Yarn Classic/Berry-era tags,
+// sha384 is used by Corepack-compatible alternatives such as mise).
+// Arbitrary "+garbage" suffixes are errors, never silently stripped:
+// they are not the syntax we support, so guessing them away would
+// corrupt the declared toolchain identity.
+var corepackHash = regexp.MustCompile(`^sha(224|256|384|512)\.[0-9a-f]+$`)
+
+// splitPackageManager parses "<name>@<version>" and validates the
+// version as an exact semantic version.
+//
+//   - STRICT exact semantics: pnpm@10, pnpm@10.15 and pnpm@v10.15.1
+//     are explicit errors — no coercion to 10.0.0/10.15.0 (that
+//     changed version identity must be chosen by the project, not
+//     invented by WOMM). Pre-release exact versions
+//     (yarn@4.0.0-rc.1) are valid.
 //   - Corepack integrity hashes ("+sha…") are scaffolding for the
-//     artifact, not part of the runtime version: the hash is stripped
-//     from the returned constraint while the caller keeps the full
-//     literal as Evidence.Value.
+//     artifact, not part of the runtime version: the hash is
+//     validated (see corepackHash) and stripped from the returned
+//     constraint while the caller keeps the full literal as
+//     Evidence.Value. Unknown or malformed hashes fail: they are not
+//     a supported Corepack form.
 //   - Corepack URLs (yarn@https://…) are unsupported at this stage.
 func splitPackageManager(pm string) (string, string, error) {
 	if strings.Contains(pm, "://") {
@@ -103,17 +120,20 @@ func splitPackageManager(pm string) (string, string, error) {
 	if !packageManagerNames[name] {
 		return "", "", fmt.Errorf("unsupported package manager %q (supported: npm, pnpm, yarn)", name)
 	}
-	// Strip Corepack integrity hash; validate what remains as an
-	// exact version.
+	// Separate a Corepack integrity hash, validating its shape; the
+	// remainder must be an exact semver.
 	base := version
-	if plus := strings.Index(version, "+"); plus >= 0 {
-		base = version[:plus]
+	if idx := strings.Index(version, "+"); idx >= 0 {
+		if !corepackHash.MatchString(version[idx+1:]) {
+			return "", "", fmt.Errorf("integrity hash suffix %q is not a supported Corepack checksum form (expected +sha224|sha256|sha384|sha512.<hex>)", version[idx:])
+		}
+		base = version[:idx]
 	}
-	v, err := semver.NewVersion(base)
+	v, err := semver.StrictNewVersion(base)
 	if err != nil {
-		return "", "", fmt.Errorf("version %q must be an exact version (ranges and tags are not accepted); expected \"<name>@<version>\"", version)
+		return "", "", fmt.Errorf("version %q must be an exact version (strict semver; short forms like 10 or 10.15 are not coerced, ranges and tags are not accepted)", version)
 	}
 	// The constraint is the pin WOMM can verify on a machine; canonical
-	// form of the base version keeps determinism.
+	// form keeps determinism.
 	return name, v.String(), nil
 }
