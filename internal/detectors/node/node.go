@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -15,40 +16,45 @@ import (
 // ErrEvidenceConflict marks incompatible declarations for the same
 // requirement name. It must abort detection: WOMM never picks the
 // strictest, the newest, or any side of a conflict (--force does not
-// belong here).
-var ErrEvidenceConflict = fmt.Errorf("evidence conflict")
+// belong here). It is a sentinel, not a formatted error.
+var ErrEvidenceConflict = errors.New("evidence conflict")
 
 // candNode is a Node requirement candidate awaiting consolidation.
 type candNode struct {
-	constraint string
+	constraint string // normalized constraint ("22.14.0", ">=20 <25")
 	source     string
 	field      string
-	value      string
+	value      string // verbatim declared literal
 }
 
 func (c candNode) evidence() core.Evidence {
 	return core.Evidence{Source: c.source, Field: c.field, Value: c.value}
 }
 
+func (c candNode) asRequirement(name string) core.Requirement {
+	return core.Requirement{Name: name, Constraint: c.constraint, Evidence: []core.Evidence{c.evidence()}}
+}
+
 // NodeDetector reads the project's explicit Node.js requirements from
 // package.json (engines.node) and .nvmrc.
 //
-// Detection semantics:
+// Consolidation policy for v0.0.1 (chosen so the detector can never
+// emit a model the schema rejects — duplicate names are invalid):
 //
-//   - Each evidence source produces a candidate with the literal
-//     value preserved in Evidence.Value.
-//   - Candidates sharing identical constraint strings merge into one
-//     requirement carrying the union of evidence (the constraint is
-//     the same string both sources declared: no selection occurred).
-//   - Candidates with different constraints are checked for semantic
-//     compatibility. Incompatible same-name requirements abort
-//     detection with ErrEvidenceConflict — no picking, no averaging,
-//     no strict-side preference.
-//   - Compatible distinct constraints stay separate requirements;
-//     collapsing them into a synthetic range would invent semantics
-//     the project never declared.
+//	engines only              → Requirement{node, engines constraint}
+//	.nvmrc only (exact x.y.z) → Requirement{node, exact version}
+//	engines + .nvmrc          → engines.Check(exact)?
+//	                            yes → ONE Requirement{node, exact version}
+//	                                  Evidence: [engines.node, .nvmrc]
+//	                            no  → ErrEvidenceConflict
 //
-// L0 only: filesystem reads, JSON parsing, semver analysis. No binary
+// The both-sources result is not "picking .nvmrc": the conjunction
+// `Node >=20 AND Node ==22.14.0` is exactly `Node ==22.14.0`.
+// The generic range-intersection problem is out of scope for v0.0.1:
+// EVIDENCE_CONFLICT means provably incompatible, never "no witness
+// found".
+//
+// L0 only: filesystem reads, JSON parsing, semver checks. No binary
 // execution, no PATH introspection.
 type NodeDetector struct{}
 
@@ -57,14 +63,14 @@ func NewNodeDetector() NodeDetector { return NodeDetector{} }
 func (NodeDetector) Name() string { return "node" }
 
 func (NodeDetector) Detect(_ context.Context, projectRoot string) ([]core.Requirement, error) {
-	var cands []candNode
+	pkgPath := filepath.Join(projectRoot, "package.json")
 
 	// Source 1: package.json → engines.node
-	pkgPath := filepath.Join(projectRoot, "package.json")
-	pkgData, hasPkg, err := readFileIfPresent(pkgPath)
+	pkgData, hasPkg, err := readFileIfPresent(projectRoot, "package.json")
 	if err != nil {
 		return nil, err
 	}
+	var engines *candNode
 	if hasPkg {
 		var pkg packageJSON
 		if err := json.Unmarshal(pkgData, &pkg); err != nil {
@@ -74,126 +80,122 @@ func (NodeDetector) Detect(_ context.Context, projectRoot string) ([]core.Requir
 			if !supportsConstraint(enginesNode) {
 				return nil, unsupportedConstraint("package.json → engines.node", enginesNode)
 			}
-			cands = append(cands, candNode{
-				constraint: enginesNode, source: "package.json",
-				field: "engines.node", value: pkg.Engines.Node,
-			})
+			engines = &candNode{constraint: enginesNode, source: "package.json", field: "engines.node", value: pkg.Engines.Node}
 		}
 	}
 
 	// Source 2: .nvmrc
-	nvmData, hasNvm, err := readFileIfPresent(filepath.Join(projectRoot, ".nvmrc"))
+	nvmData, hasNvm, err := readFileIfPresent(projectRoot, ".nvmrc")
 	if err != nil {
 		return nil, err
 	}
+	var nvm *candNode
 	if hasNvm {
 		c, err := nvmrcCandidate(nvmData)
 		if err != nil {
 			return nil, err
 		}
 		if c != nil {
-			cands = append(cands, *c)
+			nvm = c
 		}
 	}
 
-	return consolidate(cands)
+	switch {
+	case engines == nil && nvm == nil:
+		return []core.Requirement{}, nil
+	case engines == nil:
+		return []core.Requirement{nvm.asRequirement("node")}, nil
+	case nvm == nil:
+		return []core.Requirement{engines.asRequirement("node")}, nil
+	}
+
+	// Both sources present: the conjunction rule. EVIDENCE_CONFLICT
+	// here is provable incompatibility (Check on concrete versions).
+	v, err := semver.NewVersion(nvm.constraint)
+	if err != nil {
+		return nil, fmt.Errorf(".nvmrc: internal constraint error for %q: %w", nvm.constraint, err)
+	}
+	ec, err := semver.NewConstraint(engines.constraint)
+	if err != nil {
+		return nil, unsupportedConstraint("package.json → engines.node", engines.constraint)
+	}
+	if !ec.Check(v) {
+		return nil, fmt.Errorf(
+			"%w: node required as %q (by %s) and %q (by %s) cannot both be true; no side is selected — resolve the declarations in the project",
+			ErrEvidenceConflict,
+			engines.constraint, engines.source+" → "+engines.field,
+			nvm.constraint, nvm.source+" → "+nvm.field)
+	}
+	return []core.Requirement{{
+		Name:       "node",
+		Constraint: nvm.constraint,
+		Evidence:   []core.Evidence{engines.evidence(), nvm.evidence()},
+	}}, nil
 }
 
-// nvmrcCandidate converts .nvmrc content into a candidate.
-//
-// File handling policy:
-//
-//	missing / whitespace-only   → no candidate, no error (absence of
-//	                              requirement is not an error)
-//	"22.14.0" / "v22.14.0" /
-//	"22.14" / "22"              → exact version constraint
-//	"lts/*", "lts/iron", "node",
-//	uninterpretable garbage     → explicit error (never guessed, never
-//	                              a silent warning)
-//
-// The first non-empty line is authoritative (nvm semantics);
-// whitespace and trailing newlines are noise.
+// unsupportedConstraint builds the explicit error for engines.node
+// values outside our semver policy: never guessed, never silently
+// compatible.
+func unsupportedConstraint(source, constraint string) error {
+	return fmt.Errorf("%s: unsupported node constraint %q (semver-compatible formats only; 'lts/*'-style values are not interpreted)", source, constraint)
+}
+
+// nvmrcCandidate converts .nvmrc content into its single supported
+// candidate. Selector semantics live in nvmrc.go; see that file for
+// the handled set (comments, KEY=value, exact versions, unsupported
+// but valid nvm syntax, multiple selectors).
 func nvmrcCandidate(data []byte) (*candNode, error) {
-	line := nvmrcLine(data)
+	line, err := nvmrcSignificant(data)
+	if err != nil {
+		return nil, err
+	}
 	if line == "" {
 		return nil, nil
 	}
-	version := strings.TrimPrefix(line, "v")
-	if _, err := semver.NewVersion(version); err != nil {
-		return nil, fmt.Errorf(".nvmrc: cannot interpret %q as a Node version (lts-style values are not supported yet): %w", line, err)
+	version, err := nvmrcSelector(line)
+	if err != nil {
+		return nil, err
 	}
 	return &candNode{constraint: version, source: ".nvmrc", field: "version", value: line}, nil
 }
 
-func nvmrcLine(data []byte) string {
+// nvmrcSignificant returns the single significant line (non-blank,
+// non-comment, non-KEY=value). Multiple real selectors are a file
+// error, not a silent first-pick.
+func nvmrcSignificant(data []byte) (string, error) {
+	var sig []string
 	for _, l := range strings.Split(string(data), "\n") {
-		if t := strings.TrimSpace(l); t != "" {
-			return t
+		t := strings.TrimSpace(l)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
 		}
+		if isKeyValueReserved(t) {
+			continue
+		}
+		if len(sig) == 1 {
+			return "", fmt.Errorf(".nvmrc: multiple version selectors (%q and %q); WOMM v0.0.1 supports exactly one explicit version", sig[0], t)
+		}
+		sig = append(sig, t)
 	}
-	return ""
+	if len(sig) == 0 {
+		return "", nil
+	}
+	return sig[0], nil
 }
 
-// consolidate merges candidates and enforces the conflict policy.
-func consolidate(cands []candNode) ([]core.Requirement, error) {
-	type group struct {
-		constraint string
-		evidence   []core.Evidence
+// isKeyValueReserved reports lines of the KEY=value form that nvm
+// reserves and WOMM ignores for now.
+func isKeyValueReserved(t string) bool {
+	i := strings.Index(t, "=")
+	if i <= 0 {
+		return false
 	}
-	var groups []group
-	for _, c := range cands {
-		merged := false
-		for i := range groups {
-			if groups[i].constraint == c.constraint {
-				groups[i].evidence = append(groups[i].evidence, c.evidence())
-				merged = true
-				break
-			}
-		}
-		if !merged {
-			groups = append(groups, group{constraint: c.constraint, evidence: []core.Evidence{c.evidence()}})
+	for _, ch := range t[:i] {
+		if !(ch == '_' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9') {
+			return false
 		}
 	}
-
-	// Semantic compatibility across distinct constraints of the same
-	// requirement name. Any conflict aborts detection: EVIDENCE_
-	// CONFLICT is a failure, never a silent pick.
-	for i := 0; i < len(groups); i++ {
-		for j := i + 1; j < len(groups); j++ {
-			ok, err := compatible(groups[i].constraint, groups[j].constraint)
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				return nil, fmt.Errorf("%w: node required as %q (by %s) and %q (by %s) cannot both be true; no side is selected — resolve the declarations in the project",
-					ErrEvidenceConflict,
-					groups[i].constraint,
-					evidenceRef(groups[i].evidence),
-					groups[j].constraint,
-					evidenceRef(groups[j].evidence))
-			}
-		}
-	}
-
-	out := make([]core.Requirement, 0, len(groups))
-	for _, g := range groups {
-		out = append(out, core.Requirement{
-			Name:       "node",
-			Constraint: g.constraint,
-			Evidence:   g.evidence,
-		})
-	}
-	return out, nil
-}
-
-// evidenceRef renders a deterministic reference of the evidence
-// backing one side of a conflict.
-func evidenceRef(evs []core.Evidence) string {
-	var parts []string
-	for _, e := range evs {
-		parts = append(parts, e.Source+" → "+e.Field)
-	}
-	return strings.Join(parts, ", ")
+	return true
 }
 
 // packageJSON is the minimal declarative surface read from
