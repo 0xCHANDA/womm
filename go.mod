@@ -1,6 +1,6 @@
 module github.com/0xCHANDA/womm
 
-go 1.27.0
+go 1.24
 
 require (
 	github.com/spf13/cobra v1.10.2
