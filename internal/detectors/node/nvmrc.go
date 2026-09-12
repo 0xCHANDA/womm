@@ -40,12 +40,24 @@ func uninterpretableSelector(line string) error {
 }
 
 // nvmrcSelector examines one significant line (blank lines and
-// comments already filtered). Returns the exact version (normalized,
-// "v" stripped) for supported selectors, or an explicit error.
+// comments already filtered). Returns a canonical, deterministic
+// representation of the exact version for supported selectors, or an
+// explicit error.
+//
+// Validation is two-layered: the regex is the shape filter for the
+// "exact version" branch, and the version itself must survive STRICT
+// semver parsing (semver.StrictNewVersion). A formally invalid
+// x.y.z-shaped value (e.g. leading zeros: "01.2.3") never produces a
+// Requirement.
 func nvmrcSelector(line string) (string, error) {
 	switch {
 	case exactVersion.MatchString(line):
-		return strings.TrimPrefix(line, "v"), nil
+		normalized := strings.TrimPrefix(line, "v")
+		v, err := semver.StrictNewVersion(normalized)
+		if err != nil {
+			return "", fmt.Errorf(".nvmrc selector %q is not a valid exact Node version (strict semver): %w", line, err)
+		}
+		return v.String(), nil
 	case nvmKnownSelectors.MatchString(line):
 		return "", unsupportedSelector(line)
 	default:

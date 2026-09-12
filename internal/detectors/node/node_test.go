@@ -135,12 +135,19 @@ func TestPackageManagerDetectorInline(t *testing.T) {
 	}{
 		{"npm", `{"packageManager": "npm@11.2.0"}`, "npm", "11.2.0", ""},
 		{"yarn", `{"packageManager": "yarn@4.6.0"}`, "yarn", "4.6.0", ""},
+		{"prerelease exact", `{"packageManager": "yarn@4.0.0-rc.1"}`, "yarn", "4.0.0-rc.1", ""},
 		{"corepack hash keeps literal", `{"packageManager": "yarn@3.2.3+sha224.953c8233f7a92884c3c2b30f2f1c130a80e07a22"}`, "yarn", "3.2.3", ""},
+		{"short major coerces? no", `{"packageManager": "pnpm@10"}`, "", "", "must be an exact version"},
+		{"short minor coerces? no", `{"packageManager": "pnpm@10.15"}`, "", "", "must be an exact version"},
+		{"v prefix coerces? no", `{"packageManager": "pnpm@v10.15.1"}`, "", "", "must be an exact version"},
 		{"garbage version", `{"packageManager": "pnpm@garbage"}`, "", "", "must be an exact version"},
 		{"yarn@ empty version", `{"packageManager": "yarn@"}`, "", "", "invalid format"},
 		{"tag not accepted", `{"packageManager": "npm@latest"}`, "", "", "must be an exact version"},
 		{"unsupported name", `{"packageManager": "corepack@3.0.0"}`, "", "", "unsupported package manager"},
 		{"corepack url", `{"packageManager": "yarn@https://example.com"}`, "", "", "not supported"},
+		{"non-hex hash", `{"packageManager": "yarn@3.2.3+sha224.NOTHEX"}`, "", "", "not a supported Corepack checksum form"},
+		{"garbage hash suffix", `{"packageManager": "yarn@3.2.3+garbage"}`, "", "", "not a supported Corepack checksum form"},
+		{"sha512 hash", `{"packageManager": "yarn@3.2.3+sha512.953c8233f7a92884c3c2b30f2f1c130a80e07a2295ab1974fabde726bf348e978"}`, "yarn", "3.2.3", ""},
 	}
 	const hashLiteral = "yarn@3.2.3+sha224.953c8233f7a92884c3c2b30f2f1c130a80e07a22"
 	for _, tc := range cases {
@@ -254,6 +261,7 @@ func TestNvmrcParsing(t *testing.T) {
 		{"comment then version", "# Node para desarrollo\n22.14.0\n", "22.14.0", ""},
 		{"key=value ignored", "FOO=bar\n22.14.0\n", "22.14.0", ""},
 		{"v prefix", "v20.5.3\n", "20.5.3", ""},
+		{"formally invalid exact (leading zero)", "01.2.3\n", "", "not a valid exact Node version"},
 		{"multiple selectors", "20.0.0\n22.0.0\n", "", "multiple version selectors"},
 		{"short version unsupported", "22\n", "", "valid nvm syntax but is not supported"},
 		{"partial version unsupported", "22.14\n", "", "valid nvm syntax but is not supported"},
@@ -351,17 +359,37 @@ func TestSymlinkContainment(t *testing.T) {
 		}
 	})
 
-	t.Run("broken symlink treated as absent", func(t *testing.T) {
+	t.Run("broken symlink is an explicit source error", func(t *testing.T) {
 		dir := t.TempDir()
 		if err := osSymlink(filepath.Join(dir, "nothing"), filepath.Join(dir, ".nvmrc")); err != nil {
 			t.Fatal(err)
 		}
+		_, err := NewNodeDetector().Detect(context.Background(), dir)
+		if err == nil {
+			t.Fatal("broken symlink must be an explicit error, not fake absence")
+		}
+		if !strings.Contains(err.Error(), "broken symlink") {
+			t.Errorf("error = %q", err.Error())
+		}
+	})
+
+	t.Run("internal target whose name starts with .. stays inside", func(t *testing.T) {
+		// Regression: "..node-version" MUST NOT be classified as an
+		// escape (rel == "..foo" is inside; rel == ".." and "../foo"
+		// are escapes).
+		dir := t.TempDir()
+		if err := writeFile(dir, "..node-version", "22.14.0\n"); err != nil {
+			t.Fatal(err)
+		}
+		if err := osSymlink(filepath.Join(dir, "..node-version"), filepath.Join(dir, ".nvmrc")); err != nil {
+			t.Fatal(err)
+		}
 		reqs, err := NewNodeDetector().Detect(context.Background(), dir)
 		if err != nil {
-			t.Fatalf("broken symlink must be treated as absent: %v", err)
+			t.Fatalf("internal '..'-prefixed file must read fine: %v", err)
 		}
-		if len(reqs) != 0 {
-			t.Errorf("expected no requirements, got %+v", reqs)
+		if len(reqs) != 1 || reqs[0].Constraint != "22.14.0" {
+			t.Errorf("requirements = %+v", reqs)
 		}
 	})
 }

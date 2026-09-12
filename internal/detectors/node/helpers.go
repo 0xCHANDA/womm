@@ -39,8 +39,11 @@ func readFileIfPresent(projectRoot, name string) ([]byte, bool, error) {
 		// Only follow symlinks if they resolve under the root.
 		resolved, serr := filepath.EvalSymlinks(full)
 		if os.IsNotExist(serr) {
-			// Broken symlink: nothing to read.
-			return nil, false, nil
+			// The filesystem entry EXISTS and declares itself as a
+			// source: a broken symlink is a real, declared source we
+			// cannot read. Faking absence would hide the problem
+			// silently (false negative): report it explicitly.
+			return nil, false, fmt.Errorf("%s is a broken symlink; the declared source exists but cannot be read", full)
 		}
 		if serr != nil {
 			return nil, false, fmt.Errorf("cannot resolve %s: %w", full, serr)
@@ -49,7 +52,9 @@ func readFileIfPresent(projectRoot, name string) ([]byte, bool, error) {
 	}
 
 	if rel, rerr := filepath.Rel(root, target); rerr != nil ||
-		strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+		rel == ".." ||
+		strings.HasPrefix(rel, ".."+string(filepath.Separator)) ||
+		filepath.IsAbs(rel) {
 		return nil, false, fmt.Errorf("%s escapes the project root; refusing to read outside the project (L0 contract)", full)
 	}
 
