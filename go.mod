@@ -3,6 +3,7 @@ module github.com/0xCHANDA/womm
 go 1.24
 
 require (
+	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 )
