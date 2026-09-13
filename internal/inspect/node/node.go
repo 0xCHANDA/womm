@@ -194,21 +194,45 @@ func (n *NodeInspector) probe(ctx context.Context, path string) (string, error) 
 }
 
 // sanitizedEnv builds the child process environment: the current
-// process environment with PATH replaced by the sanitized system
-// path. The executable itself is always started by its already
-// resolved absolute path, so this does not affect how it is found;
+// process environment with hostile-influence variables replaced.
+// The executable itself is always started by its already resolved
+// absolute path, so stripping PATH does not affect how it is found;
 // it exists so the probed tool's own environment never carries a
 // project-tainted PATH either, as defense in depth.
+//
+// NODE_OPTIONS is stripped for the same reason, one level deeper:
+// every probed tool here is ultimately a Node.js process, and
+// NODE_OPTIONS=--require <path> (set by a wrapper, a sourced shell
+// profile, or any other inherited environment) makes node execute
+// arbitrary JS at startup — including project code — before it ever
+// prints a version. The L1 guarantee is "never execute project
+// code", so a code-execution vector in the inherited environment is
+// filtered out regardless of who set it.
 func sanitizedEnv() []string {
 	env := os.Environ()
-	filtered := make([]string, 0, len(env)+1)
+	stripped := strippedEnvKeys
+	filtered := make([]string, 0, len(env)+len(stripped))
 	for _, kv := range env {
-		if strings.HasPrefix(kv, "PATH=") {
+		hostile := false
+		for _, key := range stripped {
+			if strings.HasPrefix(kv, key+"=") {
+				hostile = true
+				break
+			}
+		}
+		if hostile {
 			continue
 		}
 		filtered = append(filtered, kv)
 	}
 	return append(filtered, "PATH="+strings.Join(systemPathDirs, string(os.PathListSeparator)))
+}
+
+// strippedEnvKeys are the environment variables removed from every
+// probe's environment. PATH is replaced (not just dropped) below with
+// the sanitized system path; the rest are simply removed.
+var strippedEnvKeys = []string{
+	"NODE_OPTIONS", // node-only: can inject --require/-e code execution
 }
 
 // boundedWriter caps how many bytes it will actually retain; bytes

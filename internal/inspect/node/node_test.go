@@ -320,6 +320,68 @@ func TestInspectRespectsCallerCancellation(t *testing.T) {
 	}
 }
 
+// --- inherited-environment injection (adversarial) -----------------------
+
+// TestInspectStripsNodeOptions proves NODE_OPTIONS from the inherited
+// environment never reaches the probed binary. NODE_OPTIONS=--require
+// <file> makes every probed tool (all of them Node.js processes)
+// execute arbitrary JS at startup — including project code — before
+// printing its version. The L1 guarantee is "never execute project
+// code", so this vector must be filtered out.
+func TestInspectStripsNodeOptions(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "pwned")
+	payload := filepath.Join(t.TempDir(), "evil.js")
+	if err := os.WriteFile(payload, []byte(
+		`require("fs").writeFileSync(process.env.WOMM_TEST_MARKER, "x")`+"\n"), 0o644); err != nil {
+		t.Fatalf("writing payload: %v", err)
+	}
+	t.Setenv("WOMM_TEST_MARKER", marker)
+	t.Setenv("NODE_OPTIONS", "--require "+payload)
+
+	path := writeFakeTool(t, dir, "node", "echo v24.7.0\n")
+	// The fake tool is a /bin/sh script, so it would run regardless;
+	// the assertion is that the *injected* JS never did.
+	insp := newTestInspector(staticResolver(map[string]string{"node": path}), t.TempDir())
+	obs, err := insp.Inspect(context.Background(), core.Requirement{Name: "node"})
+	if err != nil {
+		t.Fatalf("Inspect error: %v", err)
+	}
+	if obs != (core.Observation{Name: "node", Present: true, Version: "24.7.0"}) {
+		t.Errorf("obs = %+v, want the plain version observation", obs)
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("NODE_OPTIONS --require payload was executed; inherited NODE_OPTIONS must be stripped from the probe environment")
+	}
+}
+
+// TestSanitizedEnvStripsKeysWithoutPathCollision is a direct unit check
+// of sanitizedEnv: stripped keys are removed even when other variables
+// remain, and the sanitized PATH is always present.
+func TestSanitizedEnvStripsKeysWithoutPathCollision(t *testing.T) {
+	t.Setenv("NODE_OPTIONS", "--require /evil.js")
+	t.Setenv("WOMM_TEST_INNOCENT", "keep-me")
+
+	env := sanitizedEnv()
+	joined := "\n" + strings.Join(env, "\n") + "\n"
+	if strings.Contains(joined, "NODE_OPTIONS=") {
+		t.Errorf("NODE_OPTIONS survived sanitization: %v", env)
+	}
+	if !strings.Contains(joined, "WOMM_TEST_INNOCENT=keep-me") {
+		t.Errorf("innocent variable was dropped: %v", env)
+	}
+	wantPath := "PATH=" + strings.Join(systemPathDirs, string(os.PathListSeparator))
+	found := false
+	for _, kv := range env {
+		if kv == wantPath {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("sanitized PATH %q missing from env: %v", wantPath, env)
+	}
+}
+
 // --- malformed output --------------------------------------------------
 
 func TestInspectMalformedOutputNeverFabricatesVersion(t *testing.T) {
