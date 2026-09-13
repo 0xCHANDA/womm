@@ -136,7 +136,10 @@ func TestPackageManagerDetectorInline(t *testing.T) {
 		{"npm", `{"packageManager": "npm@11.2.0"}`, "npm", "11.2.0", ""},
 		{"yarn", `{"packageManager": "yarn@4.6.0"}`, "yarn", "4.6.0", ""},
 		{"prerelease exact", `{"packageManager": "yarn@4.0.0-rc.1"}`, "yarn", "4.0.0-rc.1", ""},
-		{"corepack hash keeps literal", `{"packageManager": "yarn@3.2.3+sha224.953c8233f7a92884c3c2b30f2f1c130a80e07a22"}`, "yarn", "3.2.3", ""},
+		{"sha1 hash (npm)", `{"packageManager": "npm@11.2.0+sha1.` + strings.Repeat("a", 40) + `"}`, "npm", "11.2.0", ""},
+		{"sha1 hash (pnpm)", `{"packageManager": "pnpm@10.15.1+sha1.` + strings.Repeat("b", 40) + `"}`, "pnpm", "10.15.1", ""},
+		{"sha224 hash (yarn)", `{"packageManager": "yarn@3.2.3+sha224.` + strings.Repeat("c", 56) + `"}`, "yarn", "3.2.3", ""},
+		{"sha512 hash", `{"packageManager": "yarn@3.2.3+sha512.` + strings.Repeat("d", 128) + `"}`, "yarn", "3.2.3", ""},
 		{"short major coerces? no", `{"packageManager": "pnpm@10"}`, "", "", "must be an exact version"},
 		{"short minor coerces? no", `{"packageManager": "pnpm@10.15"}`, "", "", "must be an exact version"},
 		{"v prefix coerces? no", `{"packageManager": "pnpm@v10.15.1"}`, "", "", "must be an exact version"},
@@ -145,11 +148,18 @@ func TestPackageManagerDetectorInline(t *testing.T) {
 		{"tag not accepted", `{"packageManager": "npm@latest"}`, "", "", "must be an exact version"},
 		{"unsupported name", `{"packageManager": "corepack@3.0.0"}`, "", "", "unsupported package manager"},
 		{"corepack url", `{"packageManager": "yarn@https://example.com"}`, "", "", "not supported"},
-		{"non-hex hash", `{"packageManager": "yarn@3.2.3+sha224.NOTHEX"}`, "", "", "not a supported Corepack checksum form"},
+		{"unsupported algorithm", `{"packageManager": "yarn@3.2.3+sha999.` + strings.Repeat("a", 56) + `"}`, "", "", "not supported by WOMM v0.0.1"},
+		{"sha256 not in v0.0.1 subset", `{"packageManager": "yarn@3.2.3+sha256.` + strings.Repeat("a", 64) + `"}`, "", "", "not supported by WOMM v0.0.1"},
+		{"sha384 not in v0.0.1 subset", `{"packageManager": "yarn@3.2.3+sha384.` + strings.Repeat("a", 96) + `"}`, "", "", "not supported by WOMM v0.0.1"},
+		{"non-hex hash", `{"packageManager": "yarn@3.2.3+sha224.NOTHEX"}`, "", "", "must be lowercase hexadecimal"},
 		{"garbage hash suffix", `{"packageManager": "yarn@3.2.3+garbage"}`, "", "", "not a supported Corepack checksum form"},
-		{"sha512 hash", `{"packageManager": "yarn@3.2.3+sha512.953c8233f7a92884c3c2b30f2f1c130a80e07a2295ab1974fabde726bf348e978"}`, "yarn", "3.2.3", ""},
+		{"sha1 digest too short", `{"packageManager": "pnpm@10.15.1+sha1.abc"}`, "", "", "must be exactly 40 hex characters"},
+		{"sha1 digest too long", `{"packageManager": "pnpm@10.15.1+sha1.` + strings.Repeat("a", 41) + `"}`, "", "", "must be exactly 40 hex characters"},
+		{"sha224 digest too short", `{"packageManager": "yarn@3.2.3+sha224.` + strings.Repeat("c", 55) + `"}`, "", "", "must be exactly 56 hex characters"},
+		{"sha224 digest too long", `{"packageManager": "yarn@3.2.3+sha224.` + strings.Repeat("c", 57) + `"}`, "", "", "must be exactly 56 hex characters"},
+		{"sha512 digest too short", `{"packageManager": "yarn@3.2.3+sha512.` + strings.Repeat("d", 127) + `"}`, "", "", "must be exactly 128 hex characters"},
+		{"sha512 digest too long", `{"packageManager": "yarn@3.2.3+sha512.` + strings.Repeat("d", 129) + `"}`, "", "", "must be exactly 128 hex characters"},
 	}
-	const hashLiteral = "yarn@3.2.3+sha224.953c8233f7a92884c3c2b30f2f1c130a80e07a22"
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
@@ -174,15 +184,39 @@ func TestPackageManagerDetectorInline(t *testing.T) {
 				t.Errorf("requirement mismatch: %+v", r)
 			}
 			// Evidence.Value must be the verbatim declared literal —
-			// for the Corepack hash case the constraint is stripped
+			// for the Corepack hash cases the constraint is stripped
 			// but the evidence never is.
 			wantLiteral := strings.TrimPrefix(tc.json, `{"packageManager": "`)
 			wantLiteral = strings.TrimSuffix(wantLiteral, `"}`)
 			if r.Evidence[0].Value != wantLiteral {
 				t.Errorf("Evidence.Value = %q, want the verbatim %q", r.Evidence[0].Value, wantLiteral)
 			}
-			if tc.json == `{"packageManager": "`+hashLiteral+`"}` && r.Evidence[0].Value != hashLiteral {
-				t.Errorf("hash literal lost: %q", r.Evidence[0].Value)
+		})
+	}
+	// Explicit literal-preservation check: Evidence.Value keeps the
+	// FULL declared descriptor (version + hash), Constraint keeps only
+	// the exact version.
+	for _, literal := range []string{
+		"pnpm@10.15.1+sha1." + strings.Repeat("b", 40),
+		"yarn@3.2.3+sha224." + strings.Repeat("c", 56),
+		"yarn@3.2.3+sha512." + strings.Repeat("d", 128),
+	} {
+		t.Run("literal preserved", func(t *testing.T) {
+			dir := t.TempDir()
+			json := `{"packageManager": "` + literal + `"}`
+			if err := writeFile(dir, "package.json", json); err != nil {
+				t.Fatal(err)
+			}
+			reqs, err := NewPackageManagerDetector().Detect(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			r := reqs[0]
+			if r.Evidence[0].Value != literal {
+				t.Errorf("Evidence.Value = %q, want the full descriptor %q", r.Evidence[0].Value, literal)
+			}
+			if strings.Contains(r.Constraint, "+") {
+				t.Errorf("Constraint = %q, want only the exact version (no hash suffix)", r.Constraint)
 			}
 		})
 	}

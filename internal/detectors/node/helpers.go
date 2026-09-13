@@ -22,7 +22,10 @@ import (
 //  4. anything escaping the root aborts with an explicit error.
 //
 // Symlinks to targets INSIDE the project remain allowed (they are
-// ordinary project files). Broken symlinks are treated as absent.
+// ordinary project files). A missing source is absence (no requirement,
+// no error); an EXISTING broken symlink is an explicit source error —
+// the entry declares a source that cannot be read, and faking absence
+// would hide the problem silently.
 func readFileIfPresent(projectRoot, name string) ([]byte, bool, error) {
 	root, err := filepath.Abs(projectRoot)
 	if err != nil {

@@ -82,17 +82,60 @@ func (PackageManagerDetector) Detect(_ context.Context, projectRoot string) ([]c
 	}}, nil
 }
 
-// corepackHash validates the Corepack integrity-hash suffix:
+// corepackHashAlgorithms is the explicit set of Corepack integrity-hash
+// algorithms WOMM v0.0.1 supports, mapped to the exact hex digest length
+// each algorithm produces.
 //
-//	+sha<224|256|384|512>.<hex-digest>
+// The subset is justified by direct evidence in the current Corepack
+// sources (nodejs/corepack, main):
 //
-// The algorithm set is the documented Corepack-compatible set (npm
-// SRI-style checksums; sha224 appears in Yarn Classic/Berry-era tags,
-// sha384 is used by Corepack-compatible alternatives such as mise).
-// Arbitrary "+garbage" suffixes are errors, never silently stripped:
-// they are not the syntax we support, so guessing them away would
-// corrupt the declared toolchain identity.
-var corepackHash = regexp.MustCompile(`^sha(224|256|384|512)\.[0-9a-f]+$`)
+//   - sha1 and sha512 are emitted by Corepack itself:
+//     sources/npmRegistryUtils.ts (fetchLatestStableVersion) builds
+//     `${version}+sha512.<hex>` from the registry integrity field and
+//     falls back to `${version}+sha1.${shasum}`; real-world descriptors
+//     such as `pnpm@10.15.1+sha1.<hex>` and `npm@<version>+sha1.<hex>`
+//     use the sha1 form.
+//   - sha224 is the documented example in the Corepack README
+//     (`yarn@3.2.3+sha224.953c8233…`).
+//   - sha256 and sha384 have NO direct evidence as packageManager
+//     checksum forms in Corepack sources or docs (the SHA256 in
+//     verifySignature is npm registry signature verification, not a
+//     descriptor hash), so they are NOT claimed as supported in
+//     v0.0.1. WOMM represents what we know, not what probably works.
+//
+// `+garbage` suffixes, unknown algorithms and wrong-length digests are
+// all explicit errors, never silently stripped: they are not syntax we
+// support, so guessing them away would corrupt the declared toolchain
+// identity.
+var corepackHashAlgorithms = map[string]int{
+	"sha1":   40,
+	"sha224": 56,
+	"sha512": 128,
+}
+
+var corepackHexDigest = regexp.MustCompile(`^[0-9a-f]+$`)
+
+// validateCorepackHash validates a Corepack integrity hash WITHOUT the
+// leading "+" (e.g. `sha1.0123…`): the algorithm must be in the
+// supported v0.0.1 subset and the digest must be lowercase hex of the
+// exact length that algorithm produces.
+func validateCorepackHash(hash string) error {
+	algo, digest, ok := strings.Cut(hash, ".")
+	if !ok || algo == "" || digest == "" {
+		return fmt.Errorf("integrity hash %q is not a supported Corepack checksum form (expected +<algo>.<hex>; supported algorithms: sha1, sha224, sha512)", hash)
+	}
+	wantLen, supported := corepackHashAlgorithms[algo]
+	if !supported {
+		return fmt.Errorf("integrity hash algorithm %q is not supported by WOMM v0.0.1 (supported: sha1, sha224, sha512)", algo)
+	}
+	if !corepackHexDigest.MatchString(digest) {
+		return fmt.Errorf("integrity hash digest %q must be lowercase hexadecimal", digest)
+	}
+	if len(digest) != wantLen {
+		return fmt.Errorf("integrity hash digest for %s must be exactly %d hex characters, got %d", algo, wantLen, len(digest))
+	}
+	return nil
+}
 
 // splitPackageManager parses "<name>@<version>" and validates the
 // version as an exact semantic version.
@@ -104,10 +147,11 @@ var corepackHash = regexp.MustCompile(`^sha(224|256|384|512)\.[0-9a-f]+$`)
 //     (yarn@4.0.0-rc.1) are valid.
 //   - Corepack integrity hashes ("+sha…") are scaffolding for the
 //     artifact, not part of the runtime version: the hash is
-//     validated (see corepackHash) and stripped from the returned
-//     constraint while the caller keeps the full literal as
-//     Evidence.Value. Unknown or malformed hashes fail: they are not
-//     a supported Corepack form.
+//     validated (see validateCorepackHash) and stripped from the
+//     returned constraint while the caller keeps the full literal as
+//     Evidence.Value. Unknown algorithms, malformed hashes or
+//     wrong-length digests fail: they are not a supported Corepack
+//     form.
 //   - Corepack URLs (yarn@https://…) are unsupported at this stage.
 func splitPackageManager(pm string) (string, string, error) {
 	if strings.Contains(pm, "://") {
@@ -120,12 +164,12 @@ func splitPackageManager(pm string) (string, string, error) {
 	if !packageManagerNames[name] {
 		return "", "", fmt.Errorf("unsupported package manager %q (supported: npm, pnpm, yarn)", name)
 	}
-	// Separate a Corepack integrity hash, validating its shape; the
-	// remainder must be an exact semver.
+	// Separate a Corepack integrity hash, validating algorithm and
+	// digest length; the remainder must be an exact semver.
 	base := version
 	if idx := strings.Index(version, "+"); idx >= 0 {
-		if !corepackHash.MatchString(version[idx+1:]) {
-			return "", "", fmt.Errorf("integrity hash suffix %q is not a supported Corepack checksum form (expected +sha224|sha256|sha384|sha512.<hex>)", version[idx:])
+		if err := validateCorepackHash(version[idx+1:]); err != nil {
+			return "", "", err
 		}
 		base = version[:idx]
 	}
