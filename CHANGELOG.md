@@ -47,10 +47,14 @@ candidate content for the first tag, to be cut by a human.
   report, exit 3); WOMM is a child subreaper so a `setsid`-escaped
   probe descendant is adopted and killed too. (#3, #12, #15, #20, #21)
 - Version ranges are gated on npm's grammar before evaluation
-  (`>=22, <25`, `!=`, `=>`, `~>`, empty sets, `x.1.2`, `>x`, numbers
-  beyond 2^64 are explicit errors, never a false PASS; prerelease
-  identifiers containing `x` such as `>=20.0.0-next.1` are accepted).
-  (#10, #16)
+  (`>=22, <25`, `!=`, `=>`, `~>`, empty sets, `x.1.2`, `>x`, numeric
+  components above npm's `MAX_SAFE_INTEGER` (2^53-1) in a range or in
+  an observed version are explicit errors, never a false PASS;
+  prerelease identifiers containing `x` such as `>=20.0.0-next.1` are
+  accepted). A differential corpus of 2 700+ pairs generated from
+  node-semver 7.7.4 pins the contract: WOMM never says PASS where
+  node-semver rejects the range or is unsatisfied in both modes, and
+  never FAIL where both modes are satisfied. (#10, #16, #22)
 - A prerelease observed against a range is `UNKNOWN` rather than a
   verdict, because npm's engines check, node-semver's default and the
   Go semver library disagree. (#4)

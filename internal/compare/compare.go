@@ -121,6 +121,12 @@ func Compare(req core.Requirement, obs core.Observation) (core.Match, error) {
 	}
 
 	version, err := semver.StrictNewVersion(obs.Version)
+	if err == nil && (version.Major() > semverrange.MaxNumeric || version.Minor() > semverrange.MaxNumeric || version.Patch() > semverrange.MaxNumeric) {
+		// node-semver cannot represent it, so no npm consumer could
+		// ever have compared it; refusing keeps every verdict one npm
+		// would also reach.
+		err = fmt.Errorf("numeric component exceeds npm's limit of %d", semverrange.MaxNumeric)
+	}
 	if err != nil {
 		match.Status = core.StatusUnknown
 		match.Reason = "observed version is invalid"
