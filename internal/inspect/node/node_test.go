@@ -629,19 +629,21 @@ func TestInspectProbeSeesCorepackOffline(t *testing.T) {
 
 // --- descendants that leave the process group ------------------------------
 
-// TestInspectReturnsEvenIfDescendantEscapesGroup pins the bounded-time
-// guarantee against a shim whose grandchild calls setsid: it leaves the
-// process group, survives the group kill and keeps the output pipe
-// open. WaitDelay must still bring Inspect back within timeout +
-// WaitDelay, with the timeout error and the partial observation. The
-// escaped process itself cannot be reaped without cgroups — a
-// documented limitation, not a hang.
+// TestInspectReturnsEvenIfDescendantEscapesGroup pins two guarantees
+// against a shim whose grandchild calls setsid (leaves the process
+// group, survives the group kill, keeps the output pipe open):
+// WaitDelay still brings Inspect back within timeout + WaitDelay with
+// the timeout error and the partial observation, and — WOMM being a
+// child subreaper — the escaped process is adopted and killed
+// afterwards instead of living on under init.
 func TestInspectReturnsEvenIfDescendantEscapesGroup(t *testing.T) {
 	if _, err := os.Stat("/usr/bin/setsid"); err != nil {
 		t.Skip("setsid not available")
 	}
 	dir := t.TempDir()
-	path := writeFakeTool(t, dir, "yarn", "/usr/bin/setsid sh -c 'sleep 30' &\nsleep 30\n")
+	log := filepath.Join(t.TempDir(), "alive")
+	path := writeFakeTool(t, dir, "yarn",
+		"/usr/bin/setsid sh -c 'for i in $(seq 1 1500); do echo tick >> "+log+"; sleep 0.02; done' &\nsleep 30\n")
 	insp := &NodeInspector{
 		resolvePath: staticResolver(map[string]string{"yarn": path}),
 		runDir:      t.TempDir(),
@@ -658,5 +660,16 @@ func TestInspectReturnsEvenIfDescendantEscapesGroup(t *testing.T) {
 	}
 	if elapsed > 100*time.Millisecond+waitDelay+2*time.Second {
 		t.Fatalf("Inspect took %s with an escaped descendant; must be bounded by timeout + WaitDelay", elapsed)
+	}
+	// The escapee must be dead: its log stops growing.
+	time.Sleep(100 * time.Millisecond)
+	before, _ := os.ReadFile(log)
+	time.Sleep(300 * time.Millisecond)
+	after, _ := os.ReadFile(log)
+	if len(after) > len(before) {
+		t.Fatalf("setsid-escaped descendant survived Inspect (log grew %d -> %d bytes)", len(before), len(after))
+	}
+	if left := childrenOf(os.Getpid()); len(left) != 0 {
+		t.Fatalf("live adopted children remain: %v", left)
 	}
 }

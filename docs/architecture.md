@@ -203,10 +203,15 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
   `error: verification cancelled; no result`, exit 3.
 - Hard 5s timeout, process-group `SIGKILL` on cancel (`Setpgid` +
   negative-PID kill), `WaitDelay` (2s) as backstop, output capped at
-  4KiB. A descendant that leaves the process group (`setsid`) cannot
-  be reaped without cgroups; `WaitDelay` guarantees WOMM still returns
-  within timeout + 2s, with the partial observation and the timeout
-  error. Documented limitation, tested.
+  4KiB. WOMM is a child subreaper (`PR_SET_CHILD_SUBREAPER`,
+  unprivileged, Linux): a descendant that leaves the process group
+  (`setsid`) is orphaned by the group kill, reparents to WOMM instead
+  of init, and is then SIGKILLed as WOMM's own child. Only WOMM's
+  descendants can ever have WOMM as parent, killed processes stay
+  zombies so their pids are not reused, and the sweep is bounded
+  (500 ms) — the timeout guarantee never depends on it. Measured
+  before the change: WOMM returned at 7.0s (timeout + WaitDelay) and
+  the escapee lived on under init; now it is gone.
 - Missing binary → `Observation{Present: false}`; unparseable output →
   `Observation{Version: ""}`. Both are observations, never fabricated.
 
