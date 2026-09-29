@@ -46,6 +46,10 @@ as future is implemented. PRs update this file; they don't improvise.
   satisfies anything, so such declarations are now explicit errors in
   the detector and `unknown` in compare instead of a possible false
   PASS. Fuzzed.
+- **Hardening: range grammar, round two** (PR #16, from independent
+  review) — `>=20.0.0-next.1` was falsely rejected; `x.1.2`, `>x` and
+  numbers beyond 2^64 were accepted and evaluated (PASS/UNKNOWN);
+  `=24.7.0` / `v24.7.0` are now exact comparators in compare.
 - **Hardening: probe cwd** (PR #15, from independent adversarial
   review) — probes ran from `os.TempDir()`: yarn 1 executes
   `.yarnrc` `yarn-path` found by walking up from the cwd (even for
