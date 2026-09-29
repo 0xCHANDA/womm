@@ -100,12 +100,21 @@ func DefaultOutput(projectRoot string) string {
 
 // Write serializes f and stores it at path.
 //
-// Without force the file must not exist yet (ErrOutputExists). With
-// force an existing regular file is replaced. A symbolic link at path
-// is refused in both modes (ErrOutputSymlink): the write never follows
-// a link, so a hostile project cannot redirect it. The document is
-// parsed back before being written, so a file on disk is always one
-// schema.Parse accepts.
+// Without force the file must not exist yet (ErrOutputExists): the
+// file is created with O_CREAT|O_EXCL|O_NOFOLLOW, which is atomic —
+// whatever appears at path first wins, and a symlink there fails the
+// create instead of being followed.
+//
+// With force the target is replaced, never opened: the document is
+// written to a fresh O_EXCL temporary file in the same directory and
+// moved over path with rename(2). rename replaces the directory entry
+// atomically and never follows what it replaces, so between the checks
+// and the move an attacker swapping path to a symlink, a FIFO or a
+// hard link cannot make WOMM write through it, block on it, or write
+// anywhere but path. A symbolic link seen at path is refused in both
+// modes (ErrOutputSymlink) as policy; a directory cannot be replaced
+// and is refused too. The document is parsed back before being
+// written, so a file on disk is always one schema.Parse accepts.
 func Write(path string, f *schema.File, force bool) ([]byte, error) {
 	data, err := schema.Marshal(f)
 	if err != nil {
@@ -129,31 +138,63 @@ func Write(path string, f *schema.File, force bool) ([]byte, error) {
 		return nil, fmt.Errorf("cannot write %s: %w", path, err)
 	}
 
-	flags := os.O_WRONLY | os.O_CREATE | syscall.O_NOFOLLOW
-	if force {
-		flags |= os.O_TRUNC
-	} else {
-		// O_EXCL closes the window between Lstat and open: if
-		// anything appears at path meanwhile, the open fails instead
-		// of overwriting or following it.
-		flags |= os.O_EXCL
+	if !force {
+		return data, createExclusive(path, data)
 	}
-	fh, err := os.OpenFile(path, flags, 0o644)
+	return data, replaceAtomically(path, data)
+}
+
+// createExclusive creates path with the document; path must not exist.
+func createExclusive(path string, data []byte) error {
+	fh, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o644)
 	if err != nil {
 		if errors.Is(err, os.ErrExist) {
-			return nil, fmt.Errorf("%w: %s (use --force to overwrite)", ErrOutputExists, path)
+			return fmt.Errorf("%w: %s (use --force to overwrite)", ErrOutputExists, path)
 		}
 		if errors.Is(err, syscall.ELOOP) {
-			return nil, fmt.Errorf("%w: %s", ErrOutputSymlink, path)
+			return fmt.Errorf("%w: %s", ErrOutputSymlink, path)
 		}
-		return nil, fmt.Errorf("cannot write %s: %w", path, err)
+		return fmt.Errorf("cannot write %s: %w", path, err)
 	}
+	return writeAndClose(fh, path, data)
+}
+
+// replaceAtomically writes data to a fresh temporary file next to path
+// and renames it over path. The target is never opened.
+func replaceAtomically(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("cannot write %s: %w", path, err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpPath) }
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		cleanup()
+		return fmt.Errorf("cannot write %s: %w", path, err)
+	}
+	if err := writeAndClose(tmp, path, data); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		cleanup()
+		if errors.Is(err, syscall.EISDIR) || errors.Is(err, syscall.ENOTEMPTY) || errors.Is(err, syscall.EEXIST) {
+			return fmt.Errorf("cannot write %s: not a regular file", path)
+		}
+		return fmt.Errorf("cannot write %s: %w", path, err)
+	}
+	return nil
+}
+
+func writeAndClose(fh *os.File, path string, data []byte) error {
 	if _, err := fh.Write(data); err != nil {
 		fh.Close()
-		return nil, fmt.Errorf("cannot write %s: %w", path, err)
+		return fmt.Errorf("cannot write %s: %w", path, err)
 	}
 	if err := fh.Close(); err != nil {
-		return nil, fmt.Errorf("cannot write %s: %w", path, err)
+		return fmt.Errorf("cannot write %s: %w", path, err)
 	}
-	return data, nil
+	return nil
 }

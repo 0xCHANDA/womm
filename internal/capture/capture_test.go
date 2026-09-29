@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/0xCHANDA/womm/internal/core"
 	"github.com/0xCHANDA/womm/internal/detectors"
@@ -298,5 +300,107 @@ func TestWriteRefusesInvalidFile(t *testing.T) {
 	}
 	if _, serr := os.Lstat(path); !errors.Is(serr, os.ErrNotExist) {
 		t.Errorf("invalid file left an output on disk: %v", serr)
+	}
+}
+
+// TestWriteForceNeverWritesThroughHardLink: the previous O_TRUNC write
+// modified every name of the inode; a womm.yaml hard-linked to another
+// file would have rewritten that file. rename replaces the entry only.
+func TestWriteForceNeverWritesThroughHardLink(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "victim")
+	if err := os.WriteFile(victim, []byte("do not clobber\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	path := DefaultOutput(dir)
+	if err := os.Link(victim, path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Write(path, captured(t), true); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "do not clobber\n" {
+		t.Fatalf("hard-link target was written through: %q", got)
+	}
+	if got, _ := os.ReadFile(path); string(got) != wantFull {
+		t.Errorf("womm.yaml not replaced:\n%s", got)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o644 {
+		t.Errorf("mode = %v, want 0644", fi.Mode().Perm())
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".womm.yaml.tmp-") {
+			t.Errorf("temporary file left behind: %s", e.Name())
+		}
+	}
+}
+
+// TestWriteForceUnderSwapRaceNeverHangsOrEscapes hammers Write(force)
+// while another goroutine swaps the target between a regular file, a
+// symlink to a victim and a FIFO. Whatever the interleaving: no hang,
+// the victim is never modified, and nothing is ever written through a
+// FIFO (rename replaces the entry, it does not open it).
+func TestWriteForceUnderSwapRaceNeverHangsOrEscapes(t *testing.T) {
+	dir := t.TempDir()
+	path := DefaultOutput(dir)
+	victim := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(victim, []byte("victim\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := captured(t)
+
+	stop := make(chan struct{})
+	go func() {
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = os.Remove(path)
+			switch i % 3 {
+			case 0:
+				_ = os.WriteFile(path, []byte("x"), 0o644)
+			case 1:
+				_ = os.Symlink(victim, path)
+			case 2:
+				_ = syscall.Mkfifo(path, 0o644)
+			}
+		}
+	}()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 1500; i++ {
+			_, _ = Write(path, f, true)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("Write(force) hung under a swap race")
+	}
+	close(stop)
+	if got, _ := os.ReadFile(victim); string(got) != "victim\n" {
+		t.Fatalf("symlink target modified under race: %q", got)
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".womm.yaml.tmp-") {
+			t.Errorf("temporary file leaked: %s", e.Name())
+		}
+	}
+}
+
+func TestWriteForceRefusesDirectoryTarget(t *testing.T) {
+	dir := t.TempDir()
+	path := DefaultOutput(dir)
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Write(path, captured(t), true); err == nil || !strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("error = %v", err)
 	}
 }

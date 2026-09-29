@@ -59,7 +59,10 @@ candidate content for the first tag, to be cut by a human.
   (#11, #13)
 - `womm.yaml` output: existing files need `--force`; a symlink at the
   output path is refused and never followed; `verify` refuses to read
-  a `womm.yaml` that is a symlink, too. (#7, #17)
+  a `womm.yaml` that is a symlink, too. `--force` replaces the file
+  atomically (temp file + `rename`), so a path swapped to a FIFO,
+  symlink or hard link mid-write can neither block WOMM nor redirect
+  the write. (#7, #17, #19)
 - A `womm.yaml` that declares `services` or `environment` (sections
   v0.1 cannot verify) is inconclusive (exit 3, explicit error), never
   a clean PASS. (#17)
