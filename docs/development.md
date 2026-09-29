@@ -91,6 +91,21 @@ go test -run '^$' -fuzz '^FuzzRender$' -fuzztime 30s ./internal/report/
 
 A crasher lands in `testdata/fuzz/<Target>/`; commit it with the fix.
 
+## Differential semver corpus
+
+`internal/compare/testdata/node-semver-corpus.json` holds range ×
+version pairs with node-semver's own answers (`validRange`,
+`satisfies` in default and `includePrerelease` modes). The test
+`TestDifferentialAgainstNodeSemver` needs no Node runtime. To extend
+or regenerate it (research tooling only — Node is never a runtime
+dependency):
+
+```sh
+SEMVER_PATH=/path/to/node_modules/semver \
+  node internal/compare/testdata/node-semver-corpus.gen.js \
+  > internal/compare/testdata/node-semver-corpus.json
+```
+
 ## Versioning / release policy (pre-release)
 
 - `internal/cli` holds the development literal (`0.0.1-dev`) in
