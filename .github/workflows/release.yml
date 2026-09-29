@@ -1,0 +1,87 @@
+# Release artifacts. Dormant until a human pushes a version tag:
+#
+#   git tag -a v0.1.0 -m "v0.1.0" && git push origin v0.1.0
+#
+# Nothing here creates tags or publishes from main. The job builds
+# static Linux binaries for amd64 and arm64 with the version injected
+# from the tag, writes SHA-256 checksums, and attaches everything to a
+# GitHub Release for that tag. Builds are reproducible: -trimpath,
+# CGO disabled, fixed ldflags, GOTOOLCHAIN=local on the pinned Go.
+name: release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GOTOOLCHAIN: local
+      CGO_ENABLED: "0"
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: validate
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -count=1 ./...
+
+      - name: build
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          out="womm_${version}_linux_${GOARCH}"
+          go build -trimpath \
+            -ldflags "-s -w -X github.com/0xCHANDA/womm/internal/cli.version=${version}" \
+            -o "dist/${out}" ./cmd/womm
+          (cd dist && sha256sum "${out}" > "${out}.sha256")
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: womm-linux-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: checksums
+        run: |
+          cd dist
+          cat *.sha256 > SHA256SUMS
+          rm -f *.sha256
+          sha256sum -c SHA256SUMS
+          ls -l
+
+      - name: publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "See CHANGELOG.md for this version." \
+            --verify-tag \
+            dist/*

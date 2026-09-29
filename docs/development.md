@@ -103,5 +103,19 @@ A crasher lands in `testdata/fuzz/<Target>/`; commit it with the fix.
 - There are **no git tags and no releases yet**. `CHANGELOG.md` holds
   the candidate notes for the first tag; cutting the tag is a human
   decision, never an agent action.
+- `.github/workflows/release.yml` is dormant until a `v*.*.*` tag is
+  pushed. It then validates, builds static Linux amd64/arm64 binaries
+  (`-trimpath`, `CGO_ENABLED=0`, version from the tag via `-ldflags
+  -X`), writes `SHA256SUMS`, and attaches them to a GitHub Release for
+  that tag. Job permissions: `contents: read` for builds, `contents:
+  write` only for the publish step. Reproduce a release binary
+  locally with:
+
+  ```sh
+  CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath \
+    -ldflags "-s -w -X github.com/0xCHANDA/womm/internal/cli.version=0.1.0" \
+    -o womm_0.1.0_linux_amd64 ./cmd/womm
+  sha256sum womm_0.1.0_linux_amd64
+  ```
 - Do **not** bump the version literal from a feature slice; the tag
   carries the version.
