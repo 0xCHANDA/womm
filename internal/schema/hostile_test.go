@@ -109,3 +109,45 @@ func yamlQuote(s string) string {
 	b.WriteByte('"')
 	return b.String()
 }
+
+func FuzzParse(f *testing.F) {
+	seeds := []string{
+		"version: 1\nrequirements: []\n",
+		"version: 1\nrequirements:\n  - name: node\n    constraint: '>=22'\n    evidence: [{source: a, field: b, value: c}]\n",
+		"version: 2\n", "version: x\n", "requirements: []\n", "[", "version: 1\na: &a [*a]\n",
+		"version: 1\nrequirements:\n  - name: \"no\\nde\"\n    constraint: x\n    evidence: [{source: a, field: b}]\n",
+		"version: 1\nservices:\n  redis:\n    version: '>=7'\n    port: 6379\nenvironment:\n  required: [A]\n",
+	}
+	for _, s := range seeds {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		file, _, err := Parse(data)
+		if err != nil {
+			if file != nil {
+				t.Fatalf("Parse returned a file alongside an error")
+			}
+			return
+		}
+		// Anything Parse accepts must validate, serialize and parse
+		// back to an equivalent document.
+		if err := Validate(file); err != nil {
+			t.Fatalf("Parse accepted a file Validate rejects: %v", err)
+		}
+		out, err := Marshal(file)
+		if err != nil {
+			t.Fatalf("Marshal rejected a parsed file: %v", err)
+		}
+		again, _, err := Parse(out)
+		if err != nil {
+			t.Fatalf("Marshal output does not parse: %v\n%s", err, out)
+		}
+		if len(again.Requirements) != len(file.Requirements) {
+			t.Fatalf("round trip changed requirement count")
+		}
+		out2, _ := Marshal(again)
+		if string(out2) != string(out) {
+			t.Fatalf("Marshal is not a fixed point:\n%s\n---\n%s", out, out2)
+		}
+	})
+}

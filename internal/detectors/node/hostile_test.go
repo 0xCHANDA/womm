@@ -9,6 +9,11 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Masterminds/semver/v3"
+
+	"github.com/0xCHANDA/womm/internal/core"
+	"github.com/0xCHANDA/womm/internal/semverrange"
 )
 
 // detectWithin runs the Node detector and fails the test if it does not
@@ -134,4 +139,97 @@ func TestDetectorUnreadableSourceIsAnError(t *testing.T) {
 	if err == nil || !errors.Is(err, os.ErrPermission) {
 		t.Fatalf("error = %v, want a permission error (never silent absence)", err)
 	}
+}
+
+func FuzzNvmrcSelector(f *testing.F) {
+	for _, s := range []string{"v24.7.0", "24.7.0", "22", "lts/*", "lts/iron", "node", "01.2.3", "24.7.0-beta.1", "", "v", "24.7.0.1", "≥22"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, line string) {
+		got, err := nvmrcSelector(line)
+		if err != nil {
+			if got != "" {
+				t.Fatalf("error with a non-empty result: %q", got)
+			}
+			return
+		}
+		// Accepted selectors are canonical strict versions.
+		if !exactVersion.MatchString(got) || strings.HasPrefix(got, "v") {
+			t.Fatalf("nvmrcSelector(%q) = %q, not a canonical exact version", line, got)
+		}
+		if again, _ := nvmrcSelector(line); again != got {
+			t.Fatalf("not deterministic: %q vs %q", got, again)
+		}
+	})
+}
+
+func FuzzNvmrcFile(f *testing.F) {
+	for _, s := range []string{"v24.7.0\n", "# c\n24.7.0\n", "22\n24\n", "KEY=v\n24.7.0\n", "", "\n\n", "lts/*\n", "24.7.0\r\n"} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		c, err := nvmrcCandidate(data)
+		if err != nil && c != nil {
+			t.Fatalf("candidate returned with an error")
+		}
+		if err == nil && c != nil {
+			if c.source != ".nvmrc" || c.field != "version" || c.constraint == "" {
+				t.Fatalf("malformed candidate: %+v", c)
+			}
+		}
+	})
+}
+
+func FuzzSplitPackageManager(f *testing.F) {
+	for _, s := range []string{"npm@11.2.0", "pnpm@10.15.1+sha1.0123456789012345678901234567890123456789", "yarn@4.0.0-rc.1", "pnpm@10", "corepack@1", "yarn@https://x", "npm@", "@1.0.0", "npm@latest", "yarn@3.2.3+sha224." + strings.Repeat("a", 56), "npm@1.0.0+md5.abc"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, pm string) {
+		name, version, err := splitPackageManager(pm)
+		if err != nil {
+			if name != "" || version != "" {
+				t.Fatalf("error with non-empty results: %q %q", name, version)
+			}
+			return
+		}
+		if !packageManagerNames[name] {
+			t.Fatalf("accepted unsupported name %q", name)
+		}
+		if strings.Contains(version, "+") || strings.HasPrefix(version, "v") {
+			t.Fatalf("version %q is not canonical", version)
+		}
+	})
+}
+
+func FuzzPackageJSON(f *testing.F) {
+	for _, s := range []string{`{}`, `{"engines":{"node":">=22 <25"}}`, `{"packageManager":"npm@11.2.0"}`, "\xef\xbb\xbf{}", `{"engines":{"node":">=22, <25"}}`, `{"engines":`, `[]`, `{"engines":{"node":1}}`, `{"engines":{"node":"lts/*"}}`} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range []interface {
+			Detect(context.Context, string) ([]core.Requirement, error)
+		}{NewNodeDetector(), NewPackageManagerDetector()} {
+			reqs, err := d.Detect(context.Background(), dir)
+			if err != nil {
+				if reqs != nil {
+					t.Fatalf("requirements returned with an error")
+				}
+				continue
+			}
+			for _, r := range reqs {
+				if r.Name == "" || r.Constraint == "" || len(r.Evidence) == 0 {
+					t.Fatalf("requirement without name/constraint/evidence: %+v", r)
+				}
+				if _, perr := semverrange.Parse(r.Constraint); perr != nil {
+					if _, verr := semver.StrictNewVersion(r.Constraint); verr != nil {
+						t.Fatalf("emitted constraint %q is neither a range nor an exact version", r.Constraint)
+					}
+				}
+			}
+		}
+	})
 }

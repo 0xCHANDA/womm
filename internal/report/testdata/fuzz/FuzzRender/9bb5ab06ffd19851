@@ -1,0 +1,10 @@
+go test fuzz v1
+string("0")
+string("0")
+bool(false)
+string("")
+string("fail")
+string("")
+string("\n")
+string("")
+string("0")
