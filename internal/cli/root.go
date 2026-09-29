@@ -5,14 +5,16 @@
 //	exit 0 — success
 //	exit 1 — semantic FAIL (environment incompatibility)
 //	exit 2 — usage error
-//	exit 3 — execution/configuration error
+//	exit 3 — execution/configuration error, or inconclusive
+//	         verification (UNKNOWN/UNREACHABLE); wins over 1
 //
-// Commands: `version`, `capture`. No exit code 1 is produced yet:
-// semantic verification arrives with `verify`.
+// Commands: `version`, `capture`, `verify`. Exit 1 is produced by
+// `verify` for a conclusive FAIL (see internal/verify.ExitCode).
 package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -43,6 +45,7 @@ func newRootCmd() *cobra.Command {
 	root.CompletionOptions.DisableDefaultCmd = true
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newCaptureCmd())
+	root.AddCommand(newVerifyCmd())
 	return root
 }
 
@@ -71,16 +74,29 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	if err := root.ExecuteContext(ctx); err != nil {
-		return exitCodeFor(err)
+	// cobra prints usage on the *out* writer; keep stdout for the
+	// commands' own output and show usage on stderr, only for usage
+	// errors (execution errors are explained by their message).
+	root.SilenceUsage = true
+	cmd, err := root.ExecuteContextC(ctx)
+	if err == nil {
+		return 0
 	}
-	return 0
+	code := exitCodeFor(err)
+	if code == 2 && cmd != nil {
+		fmt.Fprintln(stderr, cmd.UsageString())
+	}
+	return code
 }
 
 // exitCodeFor maps cobra/pflag errors onto the public contract.
 // Flag-parse failures and unknown commands are usage errors (2);
 // anything else is an execution error (3).
 func exitCodeFor(err error) int {
+	var ec *exitCodeError
+	if errors.As(err, &ec) {
+		return ec.code
+	}
 	msg := err.Error()
 	for _, prefix := range []string{
 		"unknown command",

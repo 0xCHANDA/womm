@@ -31,10 +31,6 @@ func newCaptureCmd() *cobra.Command {
 			if output == "" {
 				output = capture.DefaultOutput(root)
 			}
-			// Past this point every error is an execution error, not
-			// a usage error: do not print the usage text for it.
-			cmd.SilenceUsage = true
-
 			file, err := capture.Capture(cmd.Context(), root)
 			if err != nil {
 				return err
