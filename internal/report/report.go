@@ -87,7 +87,7 @@ func Render(w io.Writer, matches []core.Match) error {
 
 	nameWidth := 0
 	for _, m := range ordered {
-		if l := len(printable(m.Requirement.Name)); l > nameWidth {
+		if l := utf8.RuneCountInString(printable(m.Requirement.Name)); l > nameWidth {
 			nameWidth = l
 		}
 	}
@@ -170,7 +170,9 @@ func printable(s string) string {
 		return strconv.Quote(s)
 	}
 	for _, r := range s {
-		if unicode.IsControl(r) {
+		// Cc control characters, and the Unicode line/paragraph
+		// separators (Zl/Zp) that some viewers break lines on.
+		if unicode.IsControl(r) || unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) {
 			return strconv.Quote(s)
 		}
 	}

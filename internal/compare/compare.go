@@ -102,7 +102,13 @@ func Compare(req core.Requirement, obs core.Observation) (core.Match, error) {
 		return match, nil
 	}
 
-	constraint, err := semverrange.Parse(req.Constraint)
+	normalized, err := semverrange.Normalize(req.Constraint)
+	if err != nil {
+		match.Status = core.StatusUnknown
+		match.Reason = "requirement constraint is invalid"
+		return match, fmt.Errorf("%w %q: %v", ErrInvalidConstraint, req.Constraint, err)
+	}
+	constraint, err := semverrange.Parse(normalized)
 	if err != nil {
 		match.Status = core.StatusUnknown
 		match.Reason = "requirement constraint is invalid"
@@ -135,8 +141,9 @@ func Compare(req core.Requirement, obs core.Observation) (core.Match, error) {
 
 	// An exact version is decided by equality, which every semver
 	// implementation agrees on — prerelease observations included.
-	// "=24.7.0" and "v24.7.0" are the same exact comparator in npm.
-	if exact, err := semver.StrictNewVersion(strings.TrimPrefix(strings.TrimPrefix(req.Constraint, "="), "v")); err == nil {
+	// "=24.7.0", "= 24.7.0" and "v24.7.0" are the same exact comparator
+	// in npm, so the decision is taken on the normalized spelling.
+	if exact, err := semver.StrictNewVersion(strings.TrimPrefix(strings.TrimPrefix(normalized, "="), "v")); err == nil {
 		if version.Equal(exact) {
 			match.Status = core.StatusPass
 			match.Reason = "observed version equals the required version"
