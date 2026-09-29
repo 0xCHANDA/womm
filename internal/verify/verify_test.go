@@ -354,3 +354,63 @@ func TestVerifyCancelledProbeIsNeverUnreachable(t *testing.T) {
 		t.Error("Cancelled must only report cancellation errors")
 	}
 }
+
+// FuzzExitCode pins the aggregation contract for arbitrary mixes of
+// statuses and operational errors: any error or any non-verdict status
+// forces 3; otherwise any FAIL forces 1; otherwise 0. The order of
+// matches never matters.
+func FuzzExitCode(f *testing.F) {
+	f.Add("pf", 0)
+	f.Add("pu", 0)
+	f.Add("fr", 1)
+	f.Add("", 0)
+	f.Add("p", 2)
+	f.Add("fx", 0)
+	f.Fuzz(func(t *testing.T, statuses string, errs int) {
+		var res Result
+		var anyFail, anyOther bool
+		for _, c := range statuses {
+			var s core.MatchStatus
+			switch c {
+			case 'p':
+				s = core.StatusPass
+			case 'f':
+				s = core.StatusFail
+				anyFail = true
+			case 'u':
+				s = core.StatusUnknown
+				anyOther = true
+			case 'r':
+				s = core.StatusUnreachable
+				anyOther = true
+			default:
+				s = core.MatchStatus(string(c))
+				anyOther = true
+			}
+			res.Matches = append(res.Matches, core.Match{Status: s})
+		}
+		if errs < 0 {
+			errs = -errs
+		}
+		for i := 0; i < errs%4; i++ {
+			res.Errors = append(res.Errors, errors.New("operational"))
+		}
+		want := ExitPass
+		switch {
+		case len(res.Errors) > 0 || anyOther:
+			want = ExitInconclusive
+		case anyFail:
+			want = ExitFail
+		}
+		if got := ExitCode(res); got != want {
+			t.Fatalf("statuses %q errors %d: ExitCode = %d, want %d", statuses, len(res.Errors), got, want)
+		}
+		// Order independence.
+		for i, j := 0, len(res.Matches)-1; i < j; i, j = i+1, j-1 {
+			res.Matches[i], res.Matches[j] = res.Matches[j], res.Matches[i]
+		}
+		if got := ExitCode(res); got != want {
+			t.Fatalf("ExitCode depends on match order")
+		}
+	})
+}
