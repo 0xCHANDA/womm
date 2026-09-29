@@ -61,8 +61,8 @@ const (
 	// waitDelay bounds how long Wait may block on the output pipes
 	// after the process group was killed: a descendant that escaped
 	// the group (setsid) can keep the pipe open, and WOMM must still
-	// return. Such a process is not reaped — it cannot be without
-	// cgroups — but it can never hold WOMM.
+	// return. Such a process is then killed as an adopted child (see
+	// reaper_linux.go); either way it can never hold WOMM.
 	waitDelay = 2 * time.Second
 	// maxOutputBytes bounds captured stdout+stderr. Version output is
 	// untrusted; a broken or malicious binary must not be able to
@@ -170,6 +170,7 @@ func (n *NodeInspector) probe(ctx context.Context, path string) (string, error) 
 	// path is only ever a value resolveSystemPath returned: an
 	// absolute path inside the fixed system allowlist. Executed
 	// directly, with a fixed argument — no shell involved.
+	becomeSubreaper()
 	cmd := exec.CommandContext(ctx, path, "--version")
 	cmd.Dir = n.runDir
 	cmd.Env = sanitizedEnv()
@@ -202,6 +203,11 @@ func (n *NodeInspector) probe(ctx context.Context, path string) (string, error) 
 	if err == nil {
 		return out.buf.String(), nil
 	}
+	// The group is dead and the probe reaped. Whatever left the group
+	// (setsid) was orphaned by that and is now WOMM's own child: kill
+	// it too. Best effort, bounded; the timeout guarantee above never
+	// depends on it.
+	killAdoptedDescendants()
 	// cmd.Run failed: distinguish why. exec.CommandContext kills the
 	// process as soon as ctx is done, so a failure coinciding with an
 	// expired/cancelled context is that, not a genuine exec failure.
