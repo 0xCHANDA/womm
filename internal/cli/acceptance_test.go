@@ -34,7 +34,7 @@ func TestAcceptanceCapture(t *testing.T) {
 		{project: "hash-sha1", wantReqs: map[string]string{"npm": "11.2.0"},
 			wantEvidence: map[string]string{"npm": "npm@11.2.0+sha1." + strings.Repeat("b", 40)}},
 		{project: "pm-yarn-hash224", wantReqs: map[string]string{"yarn": "3.2.3"}},
-		{project: "hash-bad", wantErr: `integrity hash algorithm "sha256" is not supported`},
+		{project: "hash-bad", wantErr: `integrity hash algorithm "md5" is not supported`},
 		{project: "nvmrc-comments", wantReqs: map[string]string{"node": "22.14.0"},
 			wantEvidence: map[string]string{"node": "22.14.0"}},
 		{project: "nvmrc-settings", wantReqs: map[string]string{"node": "22.14.0"}},

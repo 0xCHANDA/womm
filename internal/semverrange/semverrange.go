@@ -44,10 +44,11 @@ var ErrSyntax = errors.New("unsupported version range syntax")
 // before any parsing.
 const MaxLen = 512
 
-// MaxNumeric is the largest numeric component npm accepts
-// (Number.MAX_SAFE_INTEGER, 2^53-1). node-semver rejects anything
-// above it at parse time; accepting more here would let WOMM PASS a
-// range npm cannot even read.
+// MaxNumeric is npm's numeric limit (Number.MAX_SAFE_INTEGER, 2^53-1).
+// node-semver rejects components above it at parse time and ranges
+// whose derived bounds would exceed it; WOMM refuses the limit value
+// itself in ranges (covering every derived case) and anything above
+// it in observed versions.
 const MaxNumeric = 1<<53 - 1
 
 const (
@@ -90,6 +91,13 @@ func Parse(s string) (*semver.Constraints, error) {
 func Normalize(s string) (string, error) {
 	if len(s) > MaxLen {
 		return "", fmt.Errorf("%w: range longer than %d bytes", ErrSyntax, MaxLen)
+	}
+	if strings.ContainsRune(s, '\u0085') {
+		// Go's strings.Fields treats NEL as whitespace; JavaScript's
+		// \s does not, so npm reads ">=18\u0085<20" as one garbage
+		// token and rejects the range. Splitting on it here would
+		// accept what npm refuses.
+		return "", fmt.Errorf("%w: U+0085 (NEL) is not a separator for npm", ErrSyntax)
 	}
 	sets := strings.Split(s, "||")
 	normalized := make([]string, 0, len(sets))
@@ -180,10 +188,22 @@ func checkPartial(op, p string) error {
 			if wildcard {
 				return fmt.Errorf("%w: numeric component after a wildcard in %q", ErrSyntax, p)
 			}
-			if n, err := strconv.ParseUint(part, 10, 64); err != nil || n > MaxNumeric {
-				return fmt.Errorf("%w: version component %q in %q exceeds npm's limit of %d", ErrSyntax, part, p, MaxNumeric)
+			if n, err := strconv.ParseUint(part, 10, 64); err != nil || n >= MaxNumeric {
+				// npm rejects components above MAX_SAFE_INTEGER, and
+				// also ranges whose *derived* bound needs
+				// MAX_SAFE_INTEGER+1 ("^9007199254740991",
+				// "1.9007199254740991.x", "<=9007199254740991"). The
+				// literal limit alone let those through; refusing the
+				// limit value itself covers every derived case.
+				return fmt.Errorf("%w: version component %q in %q reaches npm's limit of %d", ErrSyntax, part, p, MaxNumeric)
 			}
 		}
+	}
+	if op == "~" && core == "0.0.0" {
+		// Masterminds special-cases "~0.0.0" as ">=0.0.0" (any
+		// version); npm reads it as ">=0.0.0 <0.1.0-0". A false PASS
+		// in the making — refused; "~0.0" and "^0.0.0" are fine.
+		return fmt.Errorf("%w: %q is evaluated differently by npm and the underlying library; spell the range explicitly", ErrSyntax, op+p)
 	}
 	if op != "" && (parts[0] == "x" || parts[0] == "X" || parts[0] == "*") {
 		return fmt.Errorf("%w: operator on a wildcard major version %q (spell \"*\" for any version)", ErrSyntax, op+p)

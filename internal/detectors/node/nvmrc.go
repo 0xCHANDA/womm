@@ -16,7 +16,7 @@ var exactVersion = regexp.MustCompile(`^v?\d+\.\d+\.\d+$`)
 // nvm but deliberately unsupported by WOMM v0.1 (short versions,
 // aliases and lts selectors). They must never be reinterpreted (e.g.
 // "22" must not become "22.0.0").
-var nvmKnownSelectors = regexp.MustCompile(`^(v?\d+(\.\d+){0,2}|lts/\*|lts/[a-z-]+|node|stable|default|latest)$`)
+var nvmKnownSelectors = regexp.MustCompile(`^(v?\d+(\.\d+){0,2}|lts/\*|lts/[a-z-]+|lts/-\d+|node|stable|unstable|default|latest|system|iojs(-v?\d+(\.\d+){0,2})?)$`)
 
 // unsupportedSelector builds the explicit error for nvm selectors
 // outside our v0.1 subset. The wording must NOT claim the value is

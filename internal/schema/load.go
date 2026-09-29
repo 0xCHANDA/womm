@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -71,8 +72,19 @@ var ErrTooLarge = errors.New("womm.yaml exceeds the size limit")
 // and parsing only).
 func Parse(data []byte) (*File, []string, error) {
 	var raw yaml.Node
-	if err := yaml.Unmarshal(data, &raw); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	if err := dec.Decode(&raw); err != nil {
+		if err == io.EOF {
+			return nil, nil, ErrMalformed
+		}
 		return nil, nil, fmt.Errorf("%w: %v", ErrMalformed, err)
+	}
+	// A womm.yaml is exactly one document. A second one would be
+	// silently ignored by a plain Unmarshal — and could carry a
+	// different version or requirement set.
+	var extra yaml.Node
+	if err := dec.Decode(&extra); err != io.EOF {
+		return nil, nil, fmt.Errorf("%w: more than one YAML document", ErrMalformed)
 	}
 	if raw.Kind != yaml.DocumentNode || len(raw.Content) == 0 {
 		return nil, nil, ErrMalformed

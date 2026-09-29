@@ -178,7 +178,10 @@ func nvmrcSignificant(data []byte) (string, error) {
 		if i := strings.IndexByte(l, '#'); i >= 0 {
 			l = l[:i]
 		}
-		t := strings.TrimSpace(l)
+		// nvm trims with sed's [[:space:]] (ASCII only): a NBSP or
+		// ideographic space stays part of the selector and makes it
+		// invalid for nvm, so it must not be trimmed away here.
+		t := strings.Trim(l, " \t\r\v\f")
 		if t == "" {
 			continue
 		}
@@ -210,14 +213,11 @@ func nvmrcKey(t string) (string, bool) {
 	if i <= 0 {
 		return "", false
 	}
-	key := strings.TrimSpace(t[:i])
+	// nvm treats any line with non-empty text before "=" as a
+	// setting, whatever characters the key contains.
+	key := strings.Trim(t[:i], " \t\r\v\f")
 	if key == "" {
 		return "", false
-	}
-	for _, ch := range key {
-		if !(ch == '_' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9') {
-			return "", false
-		}
 	}
 	return key, true
 }
@@ -231,20 +231,48 @@ var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 // Any syntax problem is an explicit error: a declared source that
 // cannot be interpreted is never treated as absent.
 func parsePackageJSON(path string, data []byte) (packageJSON, error) {
-	var pkg packageJSON
-	data = bytes.TrimPrefix(data, utf8BOM)
-	if err := json.Unmarshal(data, &pkg); err != nil {
+	malformed := func(err error) (packageJSON, error) {
 		return packageJSON{}, fmt.Errorf("%s: malformed package.json (declared source, cannot be interpreted safely): %w", path, err)
+	}
+	// Keys are matched exactly, as npm does: encoding/json's struct
+	// decoding is case-insensitive and last-wins, so "Engines" /
+	// "Node" / "PackageManager" would have been honoured (and would
+	// have shadowed the real keys) although npm and Corepack ignore
+	// them. Values must have the types npm expects.
+	data = bytes.TrimPrefix(data, utf8BOM)
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(data, &top); err != nil {
+		return malformed(err)
+	}
+	if top == nil {
+		return malformed(errors.New("top level is null, not an object"))
+	}
+	var pkg packageJSON
+	if raw, ok := top["engines"]; ok {
+		var engines map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &engines); err != nil {
+			return malformed(fmt.Errorf("engines is not an object: %w", err))
+		}
+		if rawNode, ok := engines["node"]; ok {
+			if err := json.Unmarshal(rawNode, &pkg.Engines.Node); err != nil {
+				return malformed(fmt.Errorf("engines.node is not a string: %w", err))
+			}
+		}
+	}
+	if raw, ok := top["packageManager"]; ok {
+		if err := json.Unmarshal(raw, &pkg.PackageManager); err != nil {
+			return malformed(fmt.Errorf("packageManager is not a string: %w", err))
+		}
 	}
 	return pkg, nil
 }
 
 // packageJSON is the minimal declarative surface read from
-// package.json. Only explicit fields are read; unknown fields are
-// ignored by design.
+// package.json. Only explicit fields are read (exact keys); unknown
+// fields are ignored by design.
 type packageJSON struct {
 	Engines struct {
-		Node string `json:"node"`
-	} `json:"engines"`
-	PackageManager string `json:"packageManager"`
+		Node string
+	}
+	PackageManager string
 }
