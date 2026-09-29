@@ -351,7 +351,9 @@ func TestWriteForceUnderSwapRaceNeverHangsOrEscapes(t *testing.T) {
 	f := captured(t)
 
 	stop := make(chan struct{})
+	swapperDone := make(chan struct{})
 	go func() {
+		defer close(swapperDone)
 		for i := 0; ; i++ {
 			select {
 			case <-stop:
@@ -383,6 +385,9 @@ func TestWriteForceUnderSwapRaceNeverHangsOrEscapes(t *testing.T) {
 		t.Fatal("Write(force) hung under a swap race")
 	}
 	close(stop)
+	// The swapper must be gone before t.TempDir's cleanup runs, or a
+	// file created mid-RemoveAll makes the cleanup itself fail.
+	<-swapperDone
 	if got, _ := os.ReadFile(victim); string(got) != "victim\n" {
 		t.Fatalf("symlink target modified under race: %q", got)
 	}
