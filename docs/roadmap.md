@@ -40,6 +40,12 @@ as future is implemented. PRs update this file; they don't improvise.
   symlink, never a merge); detection errors → exit 3, nothing
   written.
 
+- **Hardening: npm range grammar** (`internal/semverrange`, PR #10)
+  — Masterminds/semver accepts syntax npm rejects (`>=22, <25`,
+  `!=`, `=>`, `~>`, `>=22 ||`); a range npm cannot parse never
+  satisfies anything, so such declarations are now explicit errors in
+  the detector and `unknown` in compare instead of a possible false
+  PASS. Fuzzed.
 - **`womm verify`** (`internal/verify`, `internal/cli`, PR #8) —
   load `womm.yaml` → inspect → compare → report → exit code. Partial
   `Observation{Present: true}` from the inspector on probe failure,

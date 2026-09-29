@@ -51,6 +51,7 @@ Where things live (on `main`; see `docs/architecture.md` for detail):
 | Detection (L0) | `internal/detectors` + `internal/detectors/node` | `NodeDetector`, `PackageManagerDetector` |
 | Inspection (L1) | `internal/inspect` + `internal/inspect/node` | `NodeInspector` (node/npm/pnpm/yarn) |
 | Capture | `internal/capture` | detectors → sorted `schema.File`; symlink-safe `Write` |
+| Range grammar | `internal/semverrange` | npm range syntax gate over Masterminds (detector + compare) |
 | Comparison | `internal/compare` | pure `Compare`; exact/range/present; prerelease-vs-range refused |
 | Reporting | `internal/report` | `Render`/`Summarize`; presentation only |
 | Verify | `internal/verify` | inspect → compare; unreachable mapping; `ExitCode` (3 beats 1) |
@@ -67,7 +68,8 @@ These are enforced by the code today — keep enforcing them:
   validation rejects requirements without it.
 - **No silent coercion.** Strict semver only
   (`semver.StrictNewVersion`); `lts/*`, short versions and tags are
-  explicit errors, never normalized.
+  explicit errors, never normalized. Ranges go through
+  `semverrange.Parse` (npm grammar), never raw `semver.NewConstraint`.
 - **No hidden machine mutation.** Inspectors execute only resolved
   system binaries with fixed `--version` args — no shell, no project
   code, no `npx`/corepack.
