@@ -18,7 +18,7 @@ requirements.
 - [x] Requirement comparison (pure `compare` engine: exact/range/present, prerelease-vs-range refused explicitly)
 - [x] Reporting (deterministic `[]core.Match` rendering); exit code 1 arrives with `verify`
 - [x] `capture` (`womm capture [dir]` → deterministic `womm.yaml`)
-- [ ] `verify`
+- [x] `verify` (`womm verify [dir]` → report + exit code 0/1/2/3)
 - [ ] final E2E
 
 Merged:
@@ -29,6 +29,7 @@ Merged:
 - PR #4 — Requirement comparison (pure `compare` engine)
 - PR #6 — Reporting (deterministic rendering of matches)
 - PR #7 — `womm capture`
+- PR #8 — `womm verify` (unreachable contract, exit codes)
 
 ## Build
 
@@ -54,6 +55,8 @@ womm --help
 womm version
 womm capture [project-dir]        # writes <project-dir>/womm.yaml
 womm capture -o out.yaml --force  # custom output; overwrite a regular file
+womm verify  [project-dir]        # checks this machine against womm.yaml
+womm verify  -f spec.yaml         # verify a specific file
 ```
 
 `capture` reads only explicit declarations (`package.json`
@@ -80,6 +83,38 @@ requirements:
         field: packageManager
         value: pnpm@10.15.1
 ```
+
+`verify` probes only fixed `--version` invocations of `node`, `npm`,
+`pnpm`, `yarn` resolved from `/usr/local/bin`, `/usr/bin`, `/bin`
+(never the inherited `PATH`, never project code). Example:
+
+```text
+$ womm verify
+FAIL        node required 24.7.0; observed 20.19.0
+            observed version differs from the required version
+            evidence: package.json → engines.node = ">=22 <25"
+            evidence: .nvmrc → version = "v24.7.0"
+PASS        pnpm required 10.15.1; observed 10.15.1
+            observed version equals the required version
+            evidence: package.json → packageManager = "pnpm@10.15.1"
+
+2 requirements: 1 pass, 1 fail, 0 unknown, 0 unreachable
+$ echo $?
+1
+```
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | every requirement PASS |
+| 1 | at least one FAIL, nothing inconclusive |
+| 2 | usage error |
+| 3 | inconclusive: an UNKNOWN or UNREACHABLE result, a malformed `womm.yaml`, or an operational failure (3 wins over 1) |
+
+`UNREACHABLE` means the tool is installed but could not be queried
+(hung, crashed); `UNKNOWN` means WOMM refuses to decide (unparseable
+version, a prerelease against a range, invalid constraint).
 
 ## Roadmap
 

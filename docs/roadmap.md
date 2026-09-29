@@ -40,18 +40,23 @@ as future is implemented. PRs update this file; they don't improvise.
   symlink, never a merge); detection errors → exit 3, nothing
   written.
 
+- **`womm verify`** (`internal/verify`, `internal/cli`, PR #8) —
+  load `womm.yaml` → inspect → compare → report → exit code. Partial
+  `Observation{Present: true}` from the inspector on probe failure,
+  mapped to `unreachable` by verify only; unsupported requirements
+  and presence-less inspection failures stay operational errors.
+  Exit codes 0/1/2/3 fully produced (3 beats 1).
+
 ## Next vertical slices (order)
 
-1. **`womm verify`** — load `womm.yaml` → inspect → compare → report;
-   the first consumer of the full pipeline.
-2. **CLI UX + E2E** — flow wiring, help surfaces, end-to-end tests on
+1. **CLI UX + E2E** — flow wiring, help surfaces, end-to-end tests on
    the real pipeline.
-3. **Hardening (security/fuzz/property)** — fuzz the parsers
+2. **Hardening (security/fuzz/property)** — fuzz the parsers
    (`schema`, `nvmrc`, `packageManager`), property tests for
    `compare` determinism, remove holes documented in code comments.
-4. **Docs / release** — README final shape, `CHANGELOG`, tag `v0.0.1`,
+3. **Docs / release** — README final shape, `CHANGELOG`, tag `v0.0.1`,
    release notes.
-5. **Only after all of the above: new ecosystems** (Python, Docker,
+4. **Only after all of the above: new ecosystems** (Python, Docker,
    Go detectors; PostgreSQL/Redis services). Every new ecosystem is
    its own slice: detector + inspector + tests, no cross-cutting
    refactors.

@@ -139,6 +139,7 @@ func TestCaptureCommandExitCodes(t *testing.T) {
 		{"too many args", []string{"capture", "a", "b"}, 2, "accepts at most 1 arg"},
 		{"unknown flag", []string{"capture", "--bogus"}, 2, "unknown flag"},
 		{"unknown command", []string{"captur"}, 2, "unknown command"},
+		{"unknown shorthand", []string{"capture", "-z"}, 2, "unknown shorthand flag"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -148,6 +149,9 @@ func TestCaptureCommandExitCodes(t *testing.T) {
 			}
 			if !strings.Contains(stderr, tc.wantErr) {
 				t.Errorf("stderr = %q, want containing %q", stderr, tc.wantErr)
+			}
+			if hasUsage := strings.Contains(stderr, "Usage:"); hasUsage != (tc.wantCode == 2) {
+				t.Errorf("usage text on stderr = %v, want %v (usage errors only):\n%s", hasUsage, tc.wantCode == 2, stderr)
 			}
 		})
 	}

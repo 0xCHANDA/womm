@@ -30,6 +30,8 @@ go build ./cmd/womm
 # run
 ./womm --help
 ./womm version
+./womm capture ./path/to/project
+./womm verify ./path/to/project   # exit 0/1/2/3
 ```
 
 CI (`.github/workflows/ci.yml`) runs all of the above on every push and
@@ -45,7 +47,10 @@ internal/core/       domain model (Requirement, Observation, Evidence, Match)
 internal/schema/     womm.yaml v1 load/validate/parse
 internal/detectors/  L0 boundary + node detectors
 internal/inspect/    L1 boundary + node inspector
-internal/compare/    pure comparison (open PR #4)
+internal/compare/    pure comparison
+internal/capture/    detect → womm.yaml (L0 orchestration)
+internal/verify/     load → inspect → compare, unreachable mapping, exit code
+internal/report/     deterministic rendering of matches
 docs/                architecture, roadmap, agent workflow, task template
 scripts/             small verification helpers
 ```
@@ -74,8 +79,8 @@ there is no public Go API; the CLI is the API.
 ## Versioning / release policy (pre-release)
 
 - `internal/cli` holds the literal version (`0.0.1-dev`). There are
-  **no git tags and no releases yet** — intentional until the v0.0.1
-  vertical slice is done.
+  **no git tags and no releases yet** — intentional until the
+  vertical slice is reviewed for release.
 - When the slice closes: tag `v0.0.1` on `main`, wire the version to
   build metadata (`-ldflags "-X ...cli.version=x"` or similar), add a
   short `CHANGELOG`. Do **not** bump versions from a feature slice.
