@@ -28,24 +28,34 @@ user chose to run it with:
 | Corepack shims | `COREPACK_*` behaviour | all forced to off/passive |
 | yarn 1 `.yarnrc` `yarn-path`, pnpm `packageManager` | code execution during `--version` — via **cwd**, not env | cwd is `/`; `YARN_IGNORE_PATH=1`; pnpm self-management off |
 
-### `LD_PRELOAD` / `LD_LIBRARY_PATH`
+### `LD_PRELOAD` / `LD_AUDIT` / `LD_LIBRARY_PATH`
 
-Passed through **on purpose**. Reasoning:
+Stripped. An independent review demonstrated a preloaded constructor
+running inside the `node --version` probe with `LD_PRELOAD` set in the
+inherited environment. Whoever sets these in a shell affects every
+program, so the boundary is the user's own — but the guarantee WOMM
+states is that *inherited* code-injection vectors are filtered, and
+the loader is the same class as `NODE_OPTIONS`. Cost: a Node install
+that only starts with a custom `LD_LIBRARY_PATH` (rare; Nix and
+distro builds use rpath) is reported as `UNREACHABLE` with the
+loader's error in the reason — honest, never wrong.
 
-- No launcher above lets a project set them without the user first
-  running project code (`direnv allow`, `make`), at which point the
-  project already executes as the user and WOMM is not the boundary.
-- `npm run` does not export project config as `LD_*`; `.npmrc` keys
-  become `npm_config_<key>` only.
-- Stripping them breaks legitimate machines: Node builds that rely on
-  a non-default `libstdc++`/`libatomic` location, and Nix/Guix
-  profiles where `LD_LIBRARY_PATH` is how a user-level toolchain is
-  wired. A probe that cannot start would be reported as UNREACHABLE —
-  a false "cannot query" on a machine that works.
+### `HOME`, `COREPACK_HOME`, `XDG_*`
 
-If a future launcher is found that lets project content reach `LD_*`
-without user consent, the variables move to `strippedEnvKeys` with a
-regression test, as `NODE_OPTIONS` did.
+Forced, not inherited. A Corepack shim executes whatever `pnpm.cjs`
+sits in `$COREPACK_HOME` (default `$HOME/.cache/node/corepack`) with
+no integrity check; a launcher that sets `HOME` or `COREPACK_HOME`
+into the project turns a version probe into project code execution
+(demonstrated by review). The probe therefore gets `HOME` from the
+account's passwd entry and `COREPACK_HOME` derived from it;
+`XDG_CACHE_HOME` / `XDG_CONFIG_HOME` are dropped. If the account has
+no home, a non-existent path is used and cached shims fail fast
+(`UNREACHABLE`).
+
+### `NODE_V8_COVERAGE` / `NODE_REDIRECT_WARNINGS`
+
+Stripped: they make node write files during `--version`, and a probe
+never mutates the machine.
 
 ## What is out of scope
 

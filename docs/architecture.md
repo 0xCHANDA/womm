@@ -180,6 +180,12 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
 - `NODE_OPTIONS` is stripped from the probe environment (code-execution
   vector: `--require` runs arbitrary JS before `--version` prints);
   `PATH` inside the probe is replaced with the sanitized allowlist.
+- Loader injection (`LD_PRELOAD`, `LD_AUDIT`, `LD_LIBRARY_PATH`) and
+  node's file-writing switches (`NODE_V8_COVERAGE`,
+  `NODE_REDIRECT_WARNINGS`) are stripped; `HOME` and `COREPACK_HOME`
+  are forced from the account's passwd entry (a Corepack shim runs
+  whatever is in its cache directory), `XDG_CACHE_HOME` /
+  `XDG_CONFIG_HOME` dropped.
 - Corepack is forced offline and passive (`COREPACK_ENABLE_NETWORK=0`,
   `COREPACK_ENABLE_AUTO_PIN=0`, `COREPACK_ENABLE_STRICT=0`): a shim at
   `/usr/local/bin/pnpm` must neither download a package manager nor

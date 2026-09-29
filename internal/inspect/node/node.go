@@ -26,6 +26,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -265,6 +267,28 @@ func sanitizedEnv() []string {
 var strippedEnvKeys = []string{
 	"NODE_OPTIONS", // node-only: can inject --require/-e code execution
 	"PATH",         // replaced by forcedEnv
+	// Dynamic-loader injection: a preloaded or audit library runs
+	// before main() of every dynamically linked probe (node is).
+	// LD_LIBRARY_PATH can substitute libc itself. Same class as
+	// NODE_OPTIONS: inherited, project-reachable through launchers,
+	// never needed to print a version.
+	"LD_PRELOAD",
+	"LD_AUDIT",
+	"LD_LIBRARY_PATH",
+	// Make node write files during --version (coverage dumps,
+	// redirected warnings): a probe must not mutate the machine.
+	"NODE_V8_COVERAGE",
+	"NODE_REDIRECT_WARNINGS",
+	// Where Corepack shims and package managers look for caches and
+	// user config. A Corepack shim executes whatever pnpm.cjs sits in
+	// $COREPACK_HOME (default $HOME/.cache/node/corepack) with no
+	// integrity check, so an inherited COREPACK_HOME, HOME or
+	// XDG_CACHE_HOME pointing into a project is code execution.
+	// Replaced by forcedEnv with the account's real home.
+	"COREPACK_HOME",
+	"HOME",
+	"XDG_CACHE_HOME",
+	"XDG_CONFIG_HOME",
 	// Corepack reads these to decide whether it may download a package
 	// manager; they are replaced by forcedEnv so the answer is always
 	// "no".
@@ -305,6 +329,25 @@ var forcedEnv = []string{
 	"COREPACK_ENABLE_STRICT=0",
 	"YARN_IGNORE_PATH=1",
 	"npm_config_manage_package_manager_versions=false",
+	"HOME=" + accountHome,
+	"COREPACK_HOME=" + accountHome + "/.cache/node/corepack",
+}
+
+// accountHome is the home directory of the account WOMM runs as,
+// taken from the user database (os/user, /etc/passwd without cgo) —
+// never from the inherited $HOME, which a launcher can point into a
+// project. Corepack shims resolve their cache from it and package
+// managers read their user config from it; both must be the user's
+// own. When the account has no home directory a non-existent path is
+// used: cached shims then fail fast and are reported as unreachable
+// rather than run from an attacker-chosen directory.
+var accountHome = resolveAccountHome()
+
+func resolveAccountHome() string {
+	if u, err := user.Current(); err == nil && filepath.IsAbs(u.HomeDir) {
+		return filepath.Clean(u.HomeDir)
+	}
+	return "/nonexistent"
 }
 
 // boundedWriter caps how many bytes it will actually retain; bytes
