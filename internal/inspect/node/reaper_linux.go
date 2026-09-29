@@ -35,8 +35,8 @@ func becomeSubreaper() {
 // called after a probe's process group was killed and waited for.
 //
 // Why this is not a blind process-tree walk: with becomeSubreaper in
-// effect, a process can only have WOMM as its parent by being WOMM's
-// own child — either a probe exec'd by this package (already reaped by
+// effect (and WOMM not being pid 1 of its namespace, see below), a
+// process can only have WOMM as its parent by being WOMM's own child — either a probe exec'd by this package (already reaped by
 // the time this runs) or a descendant that escaped the probe's process
 // group (setsid) and was orphaned by the group kill. Nothing unrelated
 // can ever match. Killed processes stay zombies (WOMM never waits on
@@ -45,6 +45,14 @@ func becomeSubreaper() {
 // forks again between scan and kill.
 func killAdoptedDescendants() {
 	self := os.Getpid()
+	if self == 1 {
+		// As pid 1 of a PID namespace (e.g. `docker run img womm`)
+		// every orphan in the namespace reparents to WOMM whether or
+		// not it descends from a probe; the "only our descendants"
+		// argument does not hold, so the sweep is skipped. The
+		// namespace collapses when pid 1 exits anyway.
+		return
+	}
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
 		killed := 0

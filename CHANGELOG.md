@@ -53,9 +53,11 @@ candidate content for the first tag, to be cut by a human.
   cache/config, `LD_PRELOAD`/`LD_AUDIT`/`LD_LIBRARY_PATH`,
   `NODE_V8_COVERAGE`/`NODE_REDIRECT_WARNINGS` stripped (#33); 5s timeout with
   process-group kill and a 2s wait backstop; output capped at 4 KiB;
-  Ctrl-C kills a running probe and yields no verdict (no partial
-  report, exit 3); WOMM is a child subreaper so a `setsid`-escaped
-  probe descendant is adopted and killed too. (#3, #12, #15, #20, #21)
+  Ctrl-C, SIGTERM and SIGHUP kill a running probe and yield no
+  verdict (no partial report, exit 3); WOMM is a child subreaper so a
+  `setsid`-escaped probe descendant is adopted and killed too, after
+  successful probes as well (skipped when WOMM is pid 1 of a PID
+  namespace). (#3, #12, #15, #20, #21, #35)
 - Version ranges are gated on npm's grammar before evaluation
   (`>=22, <25`, `!=`, `=>`, `~>`, empty sets, `x.1.2`, `>x`, numeric
   components above npm's `MAX_SAFE_INTEGER` (2^53-1) in a range or in

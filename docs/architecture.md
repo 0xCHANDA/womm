@@ -200,7 +200,7 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
   `$TMPDIR`) would hand both an attacker-chosen ancestor. The probe
   environment additionally forces `YARN_IGNORE_PATH=1` and
   `npm_config_manage_package_manager_versions=false`.
-- Ctrl-C / SIGTERM cancel the CLI context; cancellation kills the
+- Ctrl-C / SIGTERM / SIGHUP cancel the CLI context; cancellation kills the
   running probe's process group, so a hung tool does not outlive
   WOMM (measured: return 1 ms after the signal, descendants in the
   group gone). An interrupted probe is an operational error, never an
@@ -215,7 +215,10 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
   of init, and is then SIGKILLed as WOMM's own child. Only WOMM's
   descendants can ever have WOMM as parent, killed processes stay
   zombies so their pids are not reused, and the sweep is bounded
-  (500 ms) — the timeout guarantee never depends on it. Measured
+  (500 ms) — the timeout guarantee never depends on it. The sweep
+  runs after successful probes too (a shim must not leave a detached
+  process behind) and is skipped when WOMM is pid 1 of its PID
+  namespace, where every orphan would reparent to it. Measured
   before the change: WOMM returned at 7.0s (timeout + WaitDelay) and
   the escapee lived on under init; now it is gone.
 - Missing binary → `Observation{Present: false}`; unparseable output →

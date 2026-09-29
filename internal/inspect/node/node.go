@@ -202,14 +202,15 @@ func (n *NodeInspector) probe(ctx context.Context, path string) (string, error) 
 	cmd.Stderr = out
 
 	err := cmd.Run()
+	// The probe is reaped (and on failure its group killed). Whatever
+	// left the group (setsid) was orphaned by that and is now WOMM's
+	// own child: kill it, on the success path too — a probe must not
+	// leave processes behind. Best effort, bounded; the timeout
+	// guarantee above never depends on it.
+	killAdoptedDescendants()
 	if err == nil {
 		return out.buf.String(), nil
 	}
-	// The group is dead and the probe reaped. Whatever left the group
-	// (setsid) was orphaned by that and is now WOMM's own child: kill
-	// it too. Best effort, bounded; the timeout guarantee above never
-	// depends on it.
-	killAdoptedDescendants()
 	// cmd.Run failed: distinguish why. exec.CommandContext kills the
 	// process as soon as ctx is done, so a failure coinciding with an
 	// expired/cancelled context is that, not a genuine exec failure.

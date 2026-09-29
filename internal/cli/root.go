@@ -76,11 +76,12 @@ func newVersionCmd() *cobra.Command {
 // Execute runs the root command and maps errors to the public exit-code
 // contract: usage errors exit 2, execution errors exit 3.
 func Execute() {
-	// Ctrl-C / SIGTERM cancel the context, which kills any running
-	// probe's whole process group (see inspect/node). Without this a
-	// hung probe would outlive WOMM: the probe runs in its own process
-	// group, so the terminal's SIGINT never reaches it directly.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// Ctrl-C / SIGTERM / SIGHUP (terminal or ssh drop) cancel the
+	// context, which kills any running probe's whole process group
+	// (see inspect/node). Without this a hung probe would outlive
+	// WOMM: the probe runs in its own process group, so neither the
+	// terminal's SIGINT nor its hangup reaches it directly.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
 	stop()
 	os.Exit(code)
