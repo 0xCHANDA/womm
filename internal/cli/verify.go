@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
+	"os"
 
 	"github.com/spf13/cobra"
 
@@ -49,11 +51,19 @@ func newVerifyCmd() *cobra.Command {
 				root = args[0]
 			}
 			if file == "" {
+				if fi, err := os.Stat(root); err == nil && !fi.IsDir() {
+					// `womm verify path/to/womm.yaml`: the argument is
+					// the project directory; the file goes in -f.
+					return fmt.Errorf("%s is a file, not a project directory; use --file %s (or -f) to verify a specific womm.yaml", root, root)
+				}
 				file = capture.DefaultOutput(root)
 			}
 			f, warnings, err := schema.Load(file)
 			for _, w := range warnings {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
+			}
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("no womm.yaml at %s; run `womm capture %s` to create one, or pass --file", file, root)
 			}
 			if err != nil {
 				return err

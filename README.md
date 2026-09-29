@@ -149,7 +149,10 @@ Exit codes:
 Operational failures (a requirement no inspector supports, a
 `services` or `environment` section — not verified in v0.1 — a probe
 that failed before the tool was even found) are printed on stderr as
-`error: …`, never become a status, and make the run inconclusive.
+`error: …`, never become a status, and make the run inconclusive. An
+`UNKNOWN` caused by malformed input (invalid constraint, unparseable
+observed version, prerelease against a range) keeps its status line
+on stdout *and* echoes the detail as an `error: …` line on stderr.
 
 ### Constraint semantics
 

@@ -453,7 +453,7 @@ func TestE2EBinaryExitCodes(t *testing.T) {
 	if code, stdout, stderr := runBinary(t, bad, "verify"); code != 3 || stdout != "" || !strings.Contains(stderr, "schema version 2") {
 		t.Errorf("future schema: exit %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
-	if code, _, stderr := runBinary(t, t.TempDir(), "verify"); code != 3 || !strings.Contains(stderr, "cannot read") {
+	if code, _, stderr := runBinary(t, t.TempDir(), "verify"); code != 3 || !strings.Contains(stderr, "no womm.yaml at") {
 		t.Errorf("missing womm.yaml: exit %d, stderr %q", code, stderr)
 	}
 
