@@ -211,7 +211,7 @@ func TestSummarize(t *testing.T) {
 // report line: anything with a control character is rendered quoted.
 func TestRenderEscapesControlCharacters(t *testing.T) {
 	m := core.Match{
-		Requirement: core.Requirement{Name: "no\nde", Constraint: ">=22\n<25", Evidence: []core.Evidence{{Source: "package.json", Field: "engines.node", Value: ">=22\n<25"}}},
+		Requirement: core.Requirement{Name: "no\nde", Constraint: ">=22\n<25", Evidence: []core.Evidence{{Source: "package.json\n", Field: "engines\r.node", Value: ">=22\n<25"}}},
 		Observation: core.Observation{Name: "no\nde", Present: true, Version: "24.7.0\x1b[0m"},
 		Status:      core.StatusPass,
 		Reason:      "forged\nPASS        other required x; observed y",
@@ -222,7 +222,7 @@ func TestRenderEscapesControlCharacters(t *testing.T) {
 	}
 	want := "PASS        \"no\\nde\" required \">=22\\n<25\"; observed \"24.7.0\\x1b[0m\"\n" +
 		"            \"forged\\nPASS        other required x; observed y\"\n" +
-		"            evidence: package.json → engines.node = \">=22\\n<25\"\n" +
+		"            evidence: \"package.json\\n\" → \"engines\\r.node\" = \">=22\\n<25\"\n" +
 		"\n1 requirement: 1 pass, 0 fail, 0 unknown, 0 unreachable\n"
 	if got := buf.String(); got != want {
 		t.Errorf("Render output mismatch\n--- got ---\n%s--- want ---\n%s", got, want)
@@ -247,4 +247,43 @@ func TestPrintable(t *testing.T) {
 			t.Errorf("printable(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+func FuzzRender(f *testing.F) {
+	f.Add("node", ">=22", true, "24.7.0", "pass", "ok", "package.json", "engines.node", ">=22")
+	f.Add("no\nde", "x\ty", false, "", "fail", "", "", "", "")
+	f.Add("", "", true, "\x1b[0m", "unknown", "why", "a", "b", "c")
+	f.Fuzz(func(t *testing.T, name, constraint string, present bool, version, status, reason, src, field, value string) {
+		m := core.Match{
+			Requirement: core.Requirement{Name: name, Constraint: constraint, Evidence: []core.Evidence{{Source: src, Field: field, Value: value}}},
+			Observation: core.Observation{Name: name, Present: present, Version: version},
+			Status:      core.MatchStatus(status),
+			Reason:      reason,
+		}
+		var buf bytes.Buffer
+		err := Render(&buf, []core.Match{m})
+		if _, known := labels[m.Status]; !known {
+			if !errors.Is(err, ErrUnknownStatus) || buf.Len() != 0 {
+				t.Fatalf("unknown status %q: err=%v written=%d", status, err, buf.Len())
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		// One status line, at most one reason line, exactly one
+		// evidence line, one blank, one summary: never more.
+		lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+		want := 4
+		if reason != "" {
+			want = 5
+		}
+		if len(lines) != want {
+			t.Fatalf("got %d lines, want %d:\n%s", len(lines), want, out)
+		}
+		if !strings.HasPrefix(lines[0], labels[m.Status]) {
+			t.Fatalf("first line does not start with the label: %q", lines[0])
+		}
+	})
 }

@@ -103,7 +103,7 @@ func Render(w io.Writer, matches []core.Match) error {
 			fmt.Fprintf(&b, "%s%s\n", indent, printable(m.Reason))
 		}
 		for _, ev := range m.Requirement.Evidence {
-			fmt.Fprintf(&b, "%sevidence: %s → %s = %q\n", indent, ev.Source, ev.Field, ev.Value)
+			fmt.Fprintf(&b, "%sevidence: %s → %s = %q\n", indent, printable(ev.Source), printable(ev.Field), ev.Value)
 		}
 	}
 	if len(ordered) > 0 {

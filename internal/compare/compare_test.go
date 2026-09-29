@@ -209,3 +209,39 @@ func errString(err error) string {
 	}
 	return err.Error()
 }
+
+func FuzzCompare(f *testing.F) {
+	for _, c := range []string{"present", "24.7.0", ">=22 <25", "^20 || >=22", "*", "", "not-semver", ">=22, <25", "24.7.0-beta.1"} {
+		for _, v := range []string{"", "24.7.0", "24.7.0-beta.1", "v24.7.0", "24"} {
+			f.Add(c, true, v)
+			f.Add(c, false, v)
+		}
+	}
+	f.Fuzz(func(t *testing.T, constraint string, present bool, version string) {
+		req := core.Requirement{Name: "node", Constraint: constraint}
+		obs := core.Observation{Name: "node", Present: present, Version: version}
+		m, err := Compare(req, obs)
+		switch m.Status {
+		case core.StatusPass, core.StatusFail:
+			if err != nil {
+				t.Fatalf("verdict %q with error %v", m.Status, err)
+			}
+		case core.StatusUnknown:
+		default:
+			t.Fatalf("unexpected status %q", m.Status)
+		}
+		if m.Reason == "" {
+			t.Fatal("empty reason")
+		}
+		if !present && version != "" && !errors.Is(err, ErrInconsistentObservation) {
+			t.Fatalf("contradictory observation not refused: %v", err)
+		}
+		if m.Status == core.StatusPass && (!present || (constraint != "present" && version == "")) {
+			t.Fatalf("PASS without a present, versioned target: %+v", m)
+		}
+		again, _ := Compare(req, obs)
+		if !reflect.DeepEqual(m, again) {
+			t.Fatal("Compare is not deterministic")
+		}
+	})
+}
