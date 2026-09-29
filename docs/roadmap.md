@@ -100,6 +100,13 @@ as future is implemented. PRs update this file; they don't improvise.
    the first tag (`v0.1.0` per the release notes) is a human action —
    no session tags or publishes.
 
+## v0.2 candidates
+
+Ranked in `docs/proposals/v0.2.md`: version-managed Node installations
+(`docs/proposals/version-managers.md`), machine-readable output,
+`explain`/`diff`, a Go ecosystem slice, services. Recommendation
+there: version managers, then JSON output, then Go if time remains.
+
 ## Next vertical slices (order)
 
 1. **Only after the release: new ecosystems** (Python, Docker,
