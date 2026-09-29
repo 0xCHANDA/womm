@@ -1,0 +1,5 @@
+{
+  "name": "fixture-full",
+  "engines": { "node": ">=22 <25" },
+  "packageManager": "pnpm@10.15.1+sha1.0123456789012345678901234567890123456789"
+}
