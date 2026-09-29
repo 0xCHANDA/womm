@@ -60,6 +60,14 @@ func newVerifyCmd() *cobra.Command {
 			}
 
 			res := verify.Verify(cmd.Context(), f, newInspectors())
+			if verify.Cancelled(res) {
+				// An interrupted run has no verdict to show: partial
+				// PASS lines would read as a result. Say what
+				// happened and exit inconclusive.
+				fmt.Fprintln(cmd.ErrOrStderr(), "error: verification cancelled; no result")
+				cmd.SilenceErrors = true
+				return &exitCodeError{code: verify.ExitInconclusive}
+			}
 			if err := report.Render(cmd.OutOrStdout(), res.Matches); err != nil {
 				return err
 			}

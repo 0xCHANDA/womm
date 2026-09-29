@@ -196,7 +196,11 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
   `npm_config_manage_package_manager_versions=false`.
 - Ctrl-C / SIGTERM cancel the CLI context; cancellation kills the
   running probe's process group, so a hung tool does not outlive
-  WOMM.
+  WOMM (measured: return 1 ms after the signal, descendants in the
+  group gone). An interrupted probe is an operational error, never an
+  `unreachable` verdict, and the CLI prints no report at all for a
+  cancelled run — partial PASS lines would read as a result — only
+  `error: verification cancelled; no result`, exit 3.
 - Hard 5s timeout, process-group `SIGKILL` on cancel (`Setpgid` +
   negative-PID kill), `WaitDelay` (2s) as backstop, output capped at
   4KiB. A descendant that leaves the process group (`setsid`) cannot

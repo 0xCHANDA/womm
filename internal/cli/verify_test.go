@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -280,5 +281,39 @@ func TestVerifyCommandIsDeterministic(t *testing.T) {
 	c2, o2, e2 := runCLI(t, "verify", dir)
 	if c1 != c2 || o1 != o2 || e1 != e2 {
 		t.Errorf("repeated runs differ: (%d,%q,%q) vs (%d,%q,%q)", c1, o1, e1, c2, o2, e2)
+	}
+}
+
+// cancelStub cancels the CLI context from inside the first probe, the
+// way a Ctrl-C lands while a tool is being queried.
+type cancelStub struct{ cancel context.CancelFunc }
+
+func (c cancelStub) Supports(string) bool { return true }
+func (c cancelStub) Inspect(_ context.Context, req core.Requirement) (core.Observation, error) {
+	c.cancel()
+	return core.Observation{Name: req.Name, Present: true}, context.Canceled
+}
+
+// TestVerifyCommandCancelledPrintsNoVerdict: an interrupted run must not
+// print any PASS/FAIL line — partial output reads as a result.
+func TestVerifyCommandCancelledPrintsNoVerdict(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	prev := newInspectors
+	newInspectors = func() []inspect.Inspector { return []inspect.Inspector{cancelStub{cancel}} }
+	t.Cleanup(func() { newInspectors = prev })
+
+	dir := t.TempDir()
+	writeWomm(t, dir, twoReqs)
+	var out, errb bytes.Buffer
+	code := run(ctx, []string{"verify", dir}, &out, &errb)
+	if code != 3 {
+		t.Errorf("exit %d, want 3", code)
+	}
+	if out.Len() != 0 {
+		t.Errorf("stdout must be empty after cancellation, got:\n%s", out.String())
+	}
+	if errb.String() != "error: verification cancelled; no result\n" {
+		t.Errorf("stderr = %q", errb.String())
 	}
 }

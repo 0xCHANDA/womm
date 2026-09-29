@@ -3,6 +3,7 @@ package verify
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -311,5 +312,45 @@ func TestVerifyDeclaredSectionsWithoutVerifierAreErrors(t *testing.T) {
 	only := &schema.File{Version: schema.Version, Services: map[string]schema.Service{"postgres": {Version: "16"}}}
 	if res := Verify(context.Background(), only, nil); ExitCode(res) != ExitInconclusive || len(res.Matches) != 0 {
 		t.Errorf("services-only file: exit %d, matches %+v; want 3 and none", ExitCode(res), res.Matches)
+	}
+}
+
+// cancellingInspector cancels the run from inside its first Inspect and
+// returns what a real inspector returns for an interrupted probe: the
+// partial "present" observation plus a cancellation error.
+type cancellingInspector struct {
+	cancel context.CancelFunc
+	asked  []string
+}
+
+func (c *cancellingInspector) Supports(string) bool { return true }
+func (c *cancellingInspector) Inspect(_ context.Context, req core.Requirement) (core.Observation, error) {
+	c.asked = append(c.asked, req.Name)
+	c.cancel()
+	return core.Observation{Name: req.Name, Present: true}, fmt.Errorf("inspecting %s: version probe cancelled: %w", req.Name, context.Canceled)
+}
+
+// TestVerifyCancelledProbeIsNeverUnreachable pins that a probe cut short
+// by cancellation does not become a machine verdict, the remaining
+// requirements are not probed, and Cancelled reports the run.
+func TestVerifyCancelledProbeIsNeverUnreachable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	insp := &cancellingInspector{cancel: cancel}
+	res := Verify(ctx, file(req("node", ">=22"), req("npm", ">=10")), []inspect.Inspector{insp})
+	if len(res.Matches) != 0 {
+		t.Fatalf("a cancelled probe produced a match: %+v", res.Matches)
+	}
+	if len(insp.asked) != 1 {
+		t.Fatalf("inspector asked %v; probing must stop after cancellation", insp.asked)
+	}
+	if len(res.Errors) != 2 || !errors.Is(res.Errors[0], context.Canceled) || !errors.Is(res.Errors[1], context.Canceled) {
+		t.Fatalf("errors = %v", res.Errors)
+	}
+	if !Cancelled(res) || ExitCode(res) != ExitInconclusive {
+		t.Errorf("Cancelled = %v, ExitCode = %d", Cancelled(res), ExitCode(res))
+	}
+	if Cancelled(Result{Errors: []error{errors.New("other")}}) {
+		t.Error("Cancelled must only report cancellation errors")
 	}
 }
