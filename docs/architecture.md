@@ -7,7 +7,7 @@ design. The conceptual pipeline is:
 Detector (project, L0)  → core.Requirement + Evidence
 Inspector (machine, L1) → core.Observation
 Compare                 → core.Match
-Reporting               → presentation    ← not implemented yet
+Reporting               → presentation (internal/report)
 CLI orchestration       → user-facing command surface
 ```
 
@@ -28,7 +28,7 @@ comparison is pure logic; reporting is presentation only.
 | `internal/inspect` | L1 | merged (PR 3) | `Inspector` boundary: demand-driven machine observation → `core.Observation` |
 | `internal/inspect/node` | L1 | merged (PR 3) | `NodeInspector`: node/npm/pnpm/yarn `--version` probes with full L1 containment |
 | `internal/compare` | logic | merged (PR 4) | pure `Compare(req, obs) → core.Match`; exact versions by equality, ranges for release versions only, prerelease-vs-range refused |
-| reporting | presentation | **does not exist** | — |
+| `internal/report` | presentation | merged (PR 6) | `Render([]core.Match)`: deterministic order + wording, `Summarize` counts; no inspection, no comparison, no exit codes |
 
 ## Data flow (current and planned)
 
@@ -52,8 +52,15 @@ comparison is pure logic; reporting is presentation only.
    engines check, node-semver's default and Masterminds/semver give
    three different answers, so WOMM picks none), and malformed
    inputs (`ErrInvalidConstraint`, `ErrInvalidObservedVersion`).
-4. **Report/CLI (future).** Rendering + exit-code mapping. Exit 1 will
-   (eventually) mean semantic FAIL; nothing produces it today.
+4. **Report.** `report.Render` writes one block per match in a fixed
+   order (name, constraint, observation name; stable), with the
+   status label, the constraint, a truthful description of the
+   observation (absence, unknown version, contradictory states
+   included), the reason and every evidence entry, then a summary
+   line. `report.Summarize` counts statuses. An unknown status is
+   `ErrUnknownStatus` before any byte is written. Presentation only.
+5. **CLI (future).** Exit-code mapping. Exit 1 will mean semantic
+   FAIL; nothing produces it today.
 
 ## Boundaries and dependencies (enforced)
 
@@ -62,7 +69,9 @@ comparison is pure logic; reporting is presentation only.
 - `schema` produces `core.Requirement` values — one shared model, no
   adapters between the loader and detectors.
 - `detectors` never touches `inspect`; `inspect` never decides
-  satisfaction; `compare` never does I/O; `cli` is the only printer.
+  satisfaction; `compare` never does I/O; `report` only formats what
+  it is given; `cli` is the only place that writes to the process
+  streams and exits.
 - Inspection is demand-driven: an `Inspector` `Supports(name)` gate
   refuses anything outside its fixed tool list before resolution/exec.
 
@@ -72,9 +81,9 @@ Documented on purpose — do not "resolve" these silently; they are the
 next slices (`docs/roadmap.md`):
 
 1. `internal/compare` is merged but not wired to the CLI.
-2. No reporting package; no consumer of `core.Match` yet.
+2. `internal/report` is merged but not wired to the CLI.
 3. The CLI produces 0/2/3 only; exit 1 (semantic FAIL) is part of the
-   public contract but not produced until verify+reporting exist.
+   public contract but not produced until verify exists.
 4. `capture` / `verify` commands do not exist.
 
 ## Security invariants (invariant — do not weaken)

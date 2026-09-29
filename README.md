@@ -16,7 +16,7 @@ requirements.
 - [x] L0 requirement detection (Node, package manager — engines/.nvmrc/packageManager, conflict-safe)
 - [x] L1 machine inspection (`NodeInspector`: node/npm/pnpm/yarn, sanitized + bounded probes)
 - [x] Requirement comparison (pure `compare` engine: exact/range/present, prerelease-vs-range refused explicitly)
-- [ ] Reporting / exit codes
+- [x] Reporting (deterministic `[]core.Match` rendering); exit code 1 arrives with `verify`
 - [ ] `capture`
 - [ ] `verify`
 - [ ] final E2E
@@ -27,6 +27,7 @@ Merged:
 - PR #2 — Node + package manager L0 detection
 - PR #3 — `NodeInspector` (L1 machine inspection)
 - PR #4 — Requirement comparison (pure `compare` engine)
+- PR #6 — Reporting (deterministic rendering of matches)
 
 ## Build
 
