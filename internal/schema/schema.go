@@ -29,24 +29,27 @@ import (
 const Version = 1
 
 // File is the in-memory representation of a valid womm.yaml.
+//
+// The yaml tags fix the on-disk key names and the omission rules used
+// by Marshal; Parse decodes the same names.
 type File struct {
-	Version      int
-	Requirements []core.Requirement
-	Services     map[string]Service
-	Environment  Environment
+	Version      int                `yaml:"version"`
+	Requirements []core.Requirement `yaml:"requirements"`
+	Services     map[string]Service `yaml:"services,omitempty"`
+	Environment  Environment        `yaml:"environment,omitempty"`
 }
 
 // Service mirrors schema v1 services entries.
 type Service struct {
-	Version string
-	Port    int
+	Version string `yaml:"version"`
+	Port    int    `yaml:"port,omitempty"`
 }
 
 // Environment mirrors schema v1 environment section. Only variable
 // NAMES are stored, never values.
 type Environment struct {
-	Required []string
-	Optional []string
+	Required []string `yaml:"required,omitempty"`
+	Optional []string `yaml:"optional,omitempty"`
 }
 
 // SupportedVersions are the versions this binary can fully understand.
