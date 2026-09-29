@@ -46,6 +46,10 @@ as future is implemented. PRs update this file; they don't improvise.
   satisfies anything, so such declarations are now explicit errors in
   the detector and `unknown` in compare instead of a possible false
   PASS. Fuzzed.
+- **Hardening: `.nvmrc` per nvm** (PR #18, from independent review)
+  — a comment-only `.nvmrc` or a `node=<v>` setting produced silent
+  absence although nvm rejects both; now explicit errors, inline `#`
+  comments stripped like nvm, duplicated settings refused.
 - **Hardening: unverifiable sections** (PR #17, from independent
   review) — `services` / `environment` declarations were silently
   skipped (a services-only file verified clean with exit 0); now
