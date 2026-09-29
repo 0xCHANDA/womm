@@ -134,7 +134,13 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
 
 **L0 — project reads:**
 - All declared-source reads go through `readFileIfPresent`, which
-  resolves symlinks and refuses to read outside the project root.
+  opens every path component relative to the project root through
+  `os.Root` (openat-style): a symlink that resolves outside the root
+  is refused by the open itself, not by a path inspection a
+  concurrent swap could invalidate. The open is non-blocking and the
+  opened inode is fstat'ed (regular file, size) before reading.
+  Absolute symlink targets inside the project are translated to
+  root-relative paths and re-opened through the root.
 - A broken symlink in a declared source is an explicit error, not
   silent absence (declaration implies source).
 - Only regular files are read (a FIFO or device under a declared name
@@ -147,8 +153,9 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
   literal stays in `Evidence.Value`.
 
 **womm.yaml (`internal/schema`):**
-- `Load` reads regular files only, bounded to 4 MiB, and refuses a
-  symbolic link at the path (a project could point `womm.yaml` outside
+- `Load` opens with `O_NOFOLLOW|O_NONBLOCK`, fstat's the opened inode
+  (regular files only, bounded to 4 MiB) and refuses a symbolic link
+  at the path (a project could point `womm.yaml` outside
   itself and have unknown-key warnings echo the target's keys).
 - Requirement names must be plain identifiers: valid UTF-8, no
   whitespace, no control characters (they are matched against tool

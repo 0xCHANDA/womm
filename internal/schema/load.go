@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 )
@@ -21,28 +22,29 @@ var ErrMalformed = errors.New("womm.yaml is not valid YAML")
 // and an error for malformed YAML, version incompatibility or schema
 // violations. Warnings never make Load fail.
 func Load(path string) (*File, []string, error) {
-	info, err := os.Lstat(path)
+	// The file sits inside a project WOMM did not write. A project can
+	// plant `womm.yaml -> ../anything` and steer the read outside
+	// itself (unknown-key warnings would echo the target's keys), or
+	// swap in a FIFO between a check and the open. So: the open itself
+	// refuses to follow a symlink (O_NOFOLLOW), cannot block
+	// (O_NONBLOCK), and the opened inode is what gets checked.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
 	if err != nil {
+		if errors.Is(err, syscall.ELOOP) {
+			return nil, nil, fmt.Errorf("%w: %s", ErrSymlink, path)
+		}
 		return nil, nil, fmt.Errorf("cannot read %s: %w", path, err)
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		// The file sits inside a project WOMM did not write. A
-		// project can plant `womm.yaml -> ../anything` and steer the
-		// read outside itself (unknown-key warnings would echo the
-		// target's keys). The link is refused; the same rule capture
-		// applies when writing.
-		return nil, nil, fmt.Errorf("%w: %s", ErrSymlink, path)
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, nil, fmt.Errorf("cannot read %s: %w", path, err)
 	}
 	if !info.Mode().IsRegular() {
 		// A FIFO or device would block the read forever; a directory
 		// is not a file. Never guessed around, never waited on.
 		return nil, nil, fmt.Errorf("cannot read %s: not a regular file (%s)", path, info.Mode().Type())
 	}
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, nil, fmt.Errorf("cannot read %s: %w", path, err)
-	}
-	defer f.Close()
 	data, err := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot read %s: %w", path, err)

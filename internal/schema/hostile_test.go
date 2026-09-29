@@ -173,3 +173,45 @@ func TestLoadRefusesSymlink(t *testing.T) {
 		t.Errorf("error = %q", err)
 	}
 }
+
+// TestLoadUnderFIFOSwapNeverHangs: Load must not block when womm.yaml
+// is swapped to a FIFO between any check and the open.
+func TestLoadUnderFIFOSwapNeverHangs(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "womm.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\nrequirements: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	swapperDone := make(chan struct{})
+	go func() {
+		defer close(swapperDone)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = os.Remove(path)
+			if i%2 == 0 {
+				_ = os.WriteFile(path, []byte("version: 1\nrequirements: []\n"), 0o644)
+			} else {
+				_ = syscall.Mkfifo(path, 0o644)
+			}
+		}
+	}()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 3000; i++ {
+			_, _, _ = Load(path)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("Load blocked under a FIFO swap")
+	}
+	close(stop)
+	<-swapperDone
+}

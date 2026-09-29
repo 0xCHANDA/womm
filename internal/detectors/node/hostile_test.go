@@ -236,3 +236,84 @@ func FuzzPackageJSON(f *testing.F) {
 		}
 	})
 }
+
+// TestReadFileIfPresentUnderSymlinkSwapNeverEscapes hammers the
+// declared-source read while another goroutine swaps .nvmrc between a
+// regular in-project file and a symlink to a file outside the project.
+// Every read must either return the in-project content or refuse;
+// outside content must never come back, and nothing may block.
+func TestReadFileIfPresentUnderSymlinkSwapNeverEscapes(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(outside, []byte("OUTSIDE\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	project := t.TempDir()
+	link := filepath.Join(project, ".nvmrc")
+	if err := os.WriteFile(link, []byte("INSIDE\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	swapperDone := make(chan struct{})
+	go func() {
+		defer close(swapperDone)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			_ = os.Remove(link)
+			switch i % 3 {
+			case 0:
+				_ = os.WriteFile(link, []byte("INSIDE\n"), 0o644)
+			case 1:
+				_ = os.Symlink(outside, link)
+			case 2:
+				_ = syscall.Mkfifo(link, 0o644)
+			}
+		}
+	}()
+	done := make(chan int, 1)
+	go func() {
+		escapes := 0
+		for i := 0; i < 4000; i++ {
+			data, _, err := readFileIfPresent(project, ".nvmrc")
+			if err == nil && string(data) == "OUTSIDE\n" {
+				escapes++
+			}
+		}
+		done <- escapes
+	}()
+	select {
+	case escapes := <-done:
+		if escapes != 0 {
+			t.Fatalf("outside content returned %d times under a symlink swap", escapes)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("readFileIfPresent blocked under a FIFO swap")
+	}
+	close(stop)
+	<-swapperDone
+}
+
+func TestReadFileIfPresentAbsoluteInternalSymlink(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "real"), []byte("v24.7.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(project, "real"), filepath.Join(project, ".nvmrc")); err != nil {
+		t.Fatal(err)
+	}
+	data, ok, err := readFileIfPresent(project, ".nvmrc")
+	if err != nil || !ok || string(data) != "v24.7.0\n" {
+		t.Fatalf("absolute symlink to an in-project file: data=%q ok=%v err=%v", data, ok, err)
+	}
+	// Absolute link whose target escapes: refused.
+	outside := filepath.Join(t.TempDir(), "x")
+	os.WriteFile(outside, []byte("x"), 0o644)
+	os.Remove(filepath.Join(project, ".nvmrc"))
+	os.Symlink(outside, filepath.Join(project, ".nvmrc"))
+	if _, _, err := readFileIfPresent(project, ".nvmrc"); err == nil || !strings.Contains(err.Error(), "escapes the project root") {
+		t.Fatalf("absolute escaping symlink: %v", err)
+	}
+}
