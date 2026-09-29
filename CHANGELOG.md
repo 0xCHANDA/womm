@@ -68,6 +68,17 @@ candidate content for the first tag, to be cut by a human.
   node-semver 7.7.4 pins the contract: WOMM never says PASS where
   node-semver rejects the range or is unsatisfied in both modes, and
   never FAIL where both modes are satisfied. (#10, #16, #22)
+  `~0.0.0` (evaluated as "any version" by the underlying library,
+  `<0.1.0-0` by npm), U+0085 as a separator, and ranges whose derived
+  bound would exceed npm's limit (`^9007199254740991`) are refused.
+  (#36)
+- `package.json` keys are matched exactly like npm (`Engines`, `Node`,
+  `PackageManager` no longer honoured or able to shadow the real
+  keys); Corepack `+sha256.`/`+sha384.` descriptors accepted (Corepack
+  hashes with any Node digest algorithm); `.nvmrc` settings keys and
+  ASCII-only trimming follow nvm; requirement names refuse Unicode
+  format characters (zero-width, bidi overrides); a multi-document
+  `womm.yaml` is malformed. (#36)
 - A prerelease observed against a range is `UNKNOWN` rather than a
   verdict, because npm's engines check, node-semver's default and the
   Go semver library disagree. (#4)
