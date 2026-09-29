@@ -14,8 +14,8 @@ requirements.
 
 - [x] Core model / schema
 - [x] L0 requirement detection (Node, package manager — engines/.nvmrc/packageManager, conflict-safe)
-- [~] L1 machine inspection — implemented on `feat/node-inspector`; pending review/merge
-- [ ] Requirement comparison
+- [x] L1 machine inspection (`NodeInspector`: node/npm/pnpm/yarn, sanitized + bounded probes)
+- [~] Requirement comparison — implemented on `feat/compare-engine`; open PR #4, not merged
 - [ ] Reporting / exit codes
 - [ ] `capture`
 - [ ] `verify`
@@ -25,16 +25,11 @@ Merged:
 
 - PR #1 — Foundation hardening
 - PR #2 — Node + package manager L0 detection
+- PR #3 — `NodeInspector` (L1 machine inspection)
 
 Current:
 
-- PR #3 — `NodeInspector` (L1 machine inspection: `node`, `npm`, `pnpm`,
-  `yarn`), implemented and validated on `feat/node-inspector`; pending
-  review/merge — not yet on `main`
-
-Next after merge:
-
-- PR #4 — Requirement comparison
+- PR #4 — Requirement comparison (pure `compare` engine; pending review)
 
 ## Build
 
@@ -45,8 +40,13 @@ go build ./cmd/womm
 ## Test
 
 ```sh
-go test ./...
+go test -count=1 ./...
+go test -race ./...
 ```
+
+Full validation contract and development docs: `docs/development.md`.
+Architecture, roadmap and the agent workflow for coding sessions:
+`docs/architecture.md`, `docs/roadmap.md`, `docs/agent-workflow.md`.
 
 ## Run (currently available)
 
