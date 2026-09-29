@@ -78,9 +78,11 @@ comparison is pure logic; reporting is presentation only.
    name order) the first supporting inspector observes the machine;
    the observation goes through `compare.Compare` and the match is
    kept whatever its status (a compare sentinel is echoed to stderr
-   as a diagnostic). Requirements no inspector supports, and
-   inspection failures where presence was never established, are
-   operational errors: reported on stderr, never turned into a match.
+   as a diagnostic). Requirements no inspector supports, `services`
+   and `environment` sections (no verifier in v0.1), and inspection
+   failures where presence was never established, are operational
+   errors: reported on stderr, never turned into a match, and the run
+   is inconclusive.
 
    **Unreachable contract.** `core.StatusUnreachable` means "the
    target is known to be present, but WOMM could not query it". The
@@ -145,7 +147,9 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
   literal stays in `Evidence.Value`.
 
 **womm.yaml (`internal/schema`):**
-- `Load` reads regular files only, bounded to 4 MiB.
+- `Load` reads regular files only, bounded to 4 MiB, and refuses a
+  symbolic link at the path (a project could point `womm.yaml` outside
+  itself and have unknown-key warnings echo the target's keys).
 - Requirement names must be plain identifiers: valid UTF-8, no
   whitespace, no control characters (they are matched against tool
   names and printed on their own report line).

@@ -46,6 +46,11 @@ as future is implemented. PRs update this file; they don't improvise.
   satisfies anything, so such declarations are now explicit errors in
   the detector and `unknown` in compare instead of a possible false
   PASS. Fuzzed.
+- **Hardening: unverifiable sections** (PR #17, from independent
+  review) — `services` / `environment` declarations were silently
+  skipped (a services-only file verified clean with exit 0); now
+  operational errors, exit 3. `schema.Load` refuses a symlinked
+  `womm.yaml` (a project could steer the read outside itself).
 - **Hardening: range grammar, round two** (PR #16, from independent
   review) — `>=20.0.0-next.1` was falsely rejected; `x.1.2`, `>x` and
   numbers beyond 2^64 were accepted and evaluated (PASS/UNKNOWN);
