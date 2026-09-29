@@ -27,7 +27,7 @@ comparison is pure logic; reporting is presentation only.
 | `internal/detectors/node` | L0 | merged (PR 2) | `NodeDetector` (package.json `engines.node` + `.nvmrc`, conflict-safe) and `PackageManagerDetector` (`packageManager`, Corepack hash subset) |
 | `internal/inspect` | L1 | merged (PR 3) | `Inspector` boundary: demand-driven machine observation → `core.Observation` |
 | `internal/inspect/node` | L1 | merged (PR 3) | `NodeInspector`: node/npm/pnpm/yarn `--version` probes with full L1 containment |
-| `internal/compare` | logic | **open PR #4, not on main** | pure `Compare(req, obs) → core.Match` |
+| `internal/compare` | logic | merged (PR 4) | pure `Compare(req, obs) → core.Match`; exact versions by equality, ranges for release versions only, prerelease-vs-range refused |
 | reporting | presentation | **does not exist** | — |
 
 ## Data flow (current and planned)
@@ -42,7 +42,16 @@ comparison is pure logic; reporting is presentation only.
 3. **Compare.** `compare.Compare` pairs requirement + observation into
    `core.Match` with a `MatchStatus` (`pass` / `fail` / `unreachable` /
    `unknown`) and a deterministic, human-readable `Reason`.
-   Pure: no I/O, no process execution, no printing.
+   Pure: no I/O, no process execution, no printing. Constraint
+   semantics: `present` (existence only), an exact strict semver
+   version (equality, prerelease included), or a range evaluated for
+   release versions only. Three undecidable inputs are `unknown` plus
+   a sentinel, never a verdict: a contradictory observation
+   (`Present: false` with a version, `ErrInconsistentObservation`), a
+   prerelease observed against a range (`ErrPrereleaseRange`: npm's
+   engines check, node-semver's default and Masterminds/semver give
+   three different answers, so WOMM picks none), and malformed
+   inputs (`ErrInvalidConstraint`, `ErrInvalidObservedVersion`).
 4. **Report/CLI (future).** Rendering + exit-code mapping. Exit 1 will
    (eventually) mean semantic FAIL; nothing produces it today.
 
@@ -62,8 +71,7 @@ comparison is pure logic; reporting is presentation only.
 Documented on purpose — do not "resolve" these silently; they are the
 next slices (`docs/roadmap.md`):
 
-1. `internal/compare` exists only on the open PR #4 branch
-   (`feat/compare-engine`); not merged, not wired to the CLI.
+1. `internal/compare` is merged but not wired to the CLI.
 2. No reporting package; no consumer of `core.Match` yet.
 3. The CLI produces 0/2/3 only; exit 1 (semantic FAIL) is part of the
    public contract but not produced until verify+reporting exist.
@@ -95,6 +103,8 @@ next slices (`docs/roadmap.md`):
 **Explicit refusal semantics (project-wide):**
 - `ErrEvidenceConflict` (detectors), `ErrUnsupportedTool` /
   `ErrProbeTimeout` (inspectors), `schema.ErrVersion`,
-  `compare.ErrNameMismatch` / `ErrInvalidConstraint` /
-  `ErrInvalidObservedVersion` — each a sentinel checked via
-  `errors.Is`, never swallowed.
+  `compare.ErrNameMismatch` / `ErrInconsistentObservation` /
+  `ErrInvalidConstraint` / `ErrInvalidObservedVersion` /
+  `ErrPrereleaseRange` — each a sentinel checked via `errors.Is`,
+  never swallowed. A `compare` error always comes with
+  `StatusUnknown`: an error never accompanies a PASS or a FAIL.

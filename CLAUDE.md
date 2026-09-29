@@ -49,7 +49,7 @@ Where things live (on `main`; see `docs/architecture.md` for detail):
 | Schema v1 | `internal/schema` | `womm.yaml` load/validate/parse |
 | Detection (L0) | `internal/detectors` + `internal/detectors/node` | `NodeDetector`, `PackageManagerDetector` |
 | Inspection (L1) | `internal/inspect` + `internal/inspect/node` | `NodeInspector` (node/npm/pnpm/yarn) |
-| Comparison | `internal/compare` | **on open PR #4, not yet merged** |
+| Comparison | `internal/compare` | pure `Compare`; exact/range/present; prerelease-vs-range refused |
 | Reporting | — | does not exist yet |
 
 ## Engineering principles

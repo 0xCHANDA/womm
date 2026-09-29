@@ -21,34 +21,30 @@ as future is implemented. PRs update this file; they don't improvise.
   sanitized environment (`NODE_OPTIONS` stripped), neutral CWD, 5s
   process-group-bounded probes, 4KiB output cap, missing tools as
   observations.
-
-## Current (open PR, review before proceeding)
-
 - **Compare engine** (`internal/compare`, PR #4) — pure
   `Compare(Requirement, Observation) → Match`; `present`, exact semver
-  and ranges; explicit statuses for fail/unknown/malformed; rejects
-  name mismatches. Merged-to-main status: **not merged yet**; not
-  wired to the CLI.
+  (equality) and ranges (release versions only); explicit `unknown` +
+  sentinel for name mismatches, contradictory observations
+  (absent-with-version), malformed inputs and prerelease-vs-range
+  (consumers disagree; WOMM refuses to guess). Not wired to the CLI.
 
 ## Next vertical slices (order)
 
-1. **Close compare engine** (review/merge PR #4) — prerequisite for
-   everything below.
-2. **Reporting** — render `[]core.Match` (human + deterministic);
+1. **Reporting** — render `[]core.Match` (human + deterministic);
    introduces exit-code **1** semantics for FAIL.
-3. **`womm capture`** — detect → write `womm.yaml` (evidence-backed
+2. **`womm capture`** — detect → write `womm.yaml` (evidence-backed
    only; explicit over inferred; `--force` overwrites a file, never a
    conflict check).
-4. **`womm verify`** — load `womm.yaml` → inspect → compare → report;
+3. **`womm verify`** — load `womm.yaml` → inspect → compare → report;
    the first consumer of the full pipeline.
-5. **CLI UX + E2E** — flow wiring, help surfaces, end-to-end tests on
+4. **CLI UX + E2E** — flow wiring, help surfaces, end-to-end tests on
    the real pipeline.
-6. **Hardening (security/fuzz/property)** — fuzz the parsers
+5. **Hardening (security/fuzz/property)** — fuzz the parsers
    (`schema`, `nvmrc`, `packageManager`), property tests for
    `compare` determinism, remove holes documented in code comments.
-7. **Docs / release** — README final shape, `CHANGELOG`, tag `v0.0.1`,
+6. **Docs / release** — README final shape, `CHANGELOG`, tag `v0.0.1`,
    release notes.
-8. **Only after all of the above: new ecosystems** (Python, Docker,
+7. **Only after all of the above: new ecosystems** (Python, Docker,
    Go detectors; PostgreSQL/Redis services). Every new ecosystem is
    its own slice: detector + inspector + tests, no cross-cutting
    refactors.
