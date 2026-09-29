@@ -7,84 +7,125 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // readFileIfPresent returns (data, true, nil) when name exists inside
 // projectRoot, or (nil, false, nil) when it does not. Other I/O
 // failures propagate.
 //
-// L0 containment guarantee: os.ReadFile follows symlinks, so an
-// untrusted project could point ".nvmrc" at a file outside the
-// project (".nvmrc → /etc/passwd") and make WOMM read outside the
-// declared root. This helper refuses that:
+// L0 containment guarantee, race-free: every path component is opened
+// relative to the project root through os.Root (openat-style), so a
+// symlink anywhere in the chain that resolves outside the root is
+// refused by the kernel-backed check at open time — not by a path
+// inspection that a concurrent swap could invalidate. Symlinks to
+// targets INSIDE the project remain allowed (they are ordinary project
+// files). A missing source is absence (no requirement, no error); an
+// EXISTING broken symlink is an explicit source error — the entry
+// declares a source that cannot be read, and faking absence would hide
+// the problem silently.
 //
-//  1. resolve projectRoot itself;
-//  2. resolve the file's symlink target, if any;
-//  3. verify the resolved target stays inside the root;
-//  4. anything escaping the root aborts with an explicit error.
-//
-// Symlinks to targets INSIDE the project remain allowed (they are
-// ordinary project files). A missing source is absence (no requirement,
-// no error); an EXISTING broken symlink is an explicit source error —
-// the entry declares a source that cannot be read, and faking absence
-// would hide the problem silently.
+// The open is non-blocking and the opened inode is checked with fstat:
+// a FIFO, socket, device or directory planted (or swapped in) under a
+// declared name can neither block WOMM nor be read as a declaration.
+// Reads are bounded (maxSourceBytes); a larger source is an explicit
+// error, never a truncated interpretation.
 func readFileIfPresent(projectRoot, name string) ([]byte, bool, error) {
-	root, err := filepath.Abs(projectRoot)
+	root, err := os.OpenRoot(projectRoot)
 	if err != nil {
 		return nil, false, fmt.Errorf("cannot resolve project root: %w", err)
 	}
-	root, err = filepath.EvalSymlinks(root)
+	defer root.Close()
+
+	full := filepath.Join(projectRoot, name)
+	const flags = os.O_RDONLY | syscall.O_NONBLOCK | syscall.O_CLOEXEC
+	f, err := root.OpenFile(name, flags, 0)
+	if err != nil && escapesRoot(err) {
+		// os.Root refuses every absolute symlink target. A link whose
+		// absolute target lies inside the project is an ordinary
+		// project file: translate it to a root-relative path and open
+		// that through the root again, so the final open is still
+		// contained. Anything genuinely outside stays refused.
+		if rel, ok := internalAbsoluteTarget(root, projectRoot, name); ok {
+			f, err = root.OpenFile(rel, flags, 0)
+		}
+	}
 	if err != nil {
-		return nil, false, fmt.Errorf("cannot resolve project root: %w", err)
-	}
-
-	full := filepath.Join(root, name)
-	target := full
-	if fi, lerr := os.Lstat(full); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
-		// Only follow symlinks if they resolve under the root.
-		resolved, serr := filepath.EvalSymlinks(full)
-		if os.IsNotExist(serr) {
-			// The filesystem entry EXISTS and declares itself as a
-			// source: a broken symlink is a real, declared source we
-			// cannot read. Faking absence would hide the problem
-			// silently (false negative): report it explicitly.
-			return nil, false, fmt.Errorf("%s is a broken symlink; the declared source exists but cannot be read", full)
+		switch {
+		case errors.Is(err, os.ErrNotExist):
+			// Either nothing is there, or a symlink whose target is
+			// missing. The entry itself decides which.
+			if fi, lerr := root.Lstat(name); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+				return nil, false, fmt.Errorf("%s is a broken symlink; the declared source exists but cannot be read", full)
+			}
+			return nil, false, nil
+		case escapesRoot(err):
+			return nil, false, fmt.Errorf("%s escapes the project root; refusing to read outside the project (L0 contract)", full)
+		default:
+			return nil, false, fmt.Errorf("cannot read %s: %w", full, err)
 		}
-		if serr != nil {
-			return nil, false, fmt.Errorf("cannot resolve %s: %w", full, serr)
-		}
-		target = resolved
 	}
+	defer f.Close()
 
-	if rel, rerr := filepath.Rel(root, target); rerr != nil ||
-		rel == ".." ||
-		strings.HasPrefix(rel, ".."+string(filepath.Separator)) ||
-		filepath.IsAbs(rel) {
-		return nil, false, fmt.Errorf("%s escapes the project root; refusing to read outside the project (L0 contract)", full)
-	}
-
-	// Only regular files are sources. A FIFO or device planted under a
-	// declared name would block the read (and WOMM) forever; a
-	// directory is not a declaration either.
-	info, err := os.Stat(target)
-	if os.IsNotExist(err) {
-		return nil, false, nil
-	}
+	// Only regular files are sources; decided on the opened inode.
+	info, err := f.Stat()
 	if err != nil {
 		return nil, false, fmt.Errorf("cannot read %s: %w", full, err)
 	}
 	if !info.Mode().IsRegular() {
 		return nil, false, fmt.Errorf("%s is not a regular file (%s); refusing to read it", full, info.Mode().Type())
 	}
-
-	data, err := readBounded(target, maxSourceBytes)
-	if os.IsNotExist(err) {
-		return nil, false, nil
+	if info.Size() > maxSourceBytes {
+		return nil, false, fmt.Errorf("cannot read %s: %w (%d bytes)", full, errSourceTooLarge, maxSourceBytes)
 	}
+
+	data, err := io.ReadAll(io.LimitReader(f, maxSourceBytes+1))
 	if err != nil {
 		return nil, false, fmt.Errorf("cannot read %s: %w", full, err)
 	}
+	if int64(len(data)) > maxSourceBytes {
+		return nil, false, fmt.Errorf("cannot read %s: %w (%d bytes)", full, errSourceTooLarge, maxSourceBytes)
+	}
 	return data, true, nil
+}
+
+// internalAbsoluteTarget handles a symlink at name whose target is an
+// absolute path: when that path lies inside the (resolved) project
+// root, the root-relative form is returned so the caller can open it
+// through os.Root. Only the entry's own link text is translated; any
+// further symlink in the target chain is resolved by os.Root itself.
+func internalAbsoluteTarget(root *os.Root, projectRoot, name string) (string, bool) {
+	fi, err := root.Lstat(name)
+	if err != nil || fi.Mode()&os.ModeSymlink != 0 == false {
+		return "", false
+	}
+	dest, err := os.Readlink(filepath.Join(projectRoot, name))
+	if err != nil || !filepath.IsAbs(dest) {
+		return "", false
+	}
+	rootAbs, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return "", false
+	}
+	if resolved, err := filepath.EvalSymlinks(rootAbs); err == nil {
+		rootAbs = resolved
+	}
+	rel, err := filepath.Rel(rootAbs, filepath.Clean(dest))
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", false
+	}
+	return rel, true
+}
+
+// escapesRoot reports whether err is os.Root's refusal to leave the
+// root (a symlink pointing outside, or a path with ".." components).
+func escapesRoot(err error) bool {
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		msg := pe.Err.Error()
+		return strings.Contains(msg, "escapes from parent") || strings.Contains(msg, "path escapes")
+	}
+	return false
 }
 
 // maxSourceBytes bounds every declared-source read. package.json and
@@ -94,22 +135,3 @@ const maxSourceBytes = 16 << 20
 
 // errSourceTooLarge marks a declared source above maxSourceBytes.
 var errSourceTooLarge = errors.New("declared source exceeds the size limit")
-
-// readBounded reads at most limit bytes from path and fails
-// explicitly when the file is larger, instead of truncating it (a
-// truncated declaration would be interpreted as something else).
-func readBounded(path string, limit int64) ([]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, limit+1))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("%w (%d bytes)", errSourceTooLarge, limit)
-	}
-	return data, nil
-}

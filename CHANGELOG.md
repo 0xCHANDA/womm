@@ -38,10 +38,13 @@ candidate content for the first tag, to be cut by a human.
 
 ### Security / hardening
 
-- L0 containment: declared-source reads resolve symlinks and refuse to
-  leave the project root; broken symlinks are errors; regular files
-  only (a FIFO cannot block WOMM); reads bounded at 16 MiB
-  (`womm.yaml`: 4 MiB). (#2, #11)
+- L0 containment: declared-source reads go through `os.Root`
+  (openat-style, race-free: a symlink swapped in mid-read cannot
+  escape the project); broken symlinks are errors; regular files only,
+  decided on the opened inode with a non-blocking open (a FIFO cannot
+  block WOMM even when swapped in after a check); reads bounded at
+  16 MiB (`womm.yaml`: 4 MiB, `O_NOFOLLOW|O_NONBLOCK` + fstat).
+  (#2, #11, #34)
 - L1 containment: tools resolve only from `/usr/local/bin`,
   `/usr/bin`, `/bin`; no shell; working directory `/` (no writable
   ancestors: yarn 1 `yarn-path` and pnpm self-version-management walk
