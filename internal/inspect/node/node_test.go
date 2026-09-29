@@ -230,7 +230,12 @@ func TestInspectNeverRunsFromProjectRoot(t *testing.T) {
 	t.Setenv("WOMM_TEST_CWD_MARKER", marker)
 	path := writeFakeTool(t, dir, "npm", "pwd > \"$WOMM_TEST_CWD_MARKER\"\necho 1.2.3\n")
 
-	insp := newTestInspector(staticResolver(map[string]string{"npm": path}), os.TempDir())
+	// TMPDIR is what os.TempDir() would have used; a relative value
+	// would have pointed the probe into the project. Production must
+	// not consult it at all.
+	t.Setenv("TMPDIR", ".")
+	insp := NewNodeInspector()
+	insp.resolvePath = staticResolver(map[string]string{"npm": path})
 	if _, err := insp.Inspect(context.Background(), core.Requirement{Name: "npm"}); err != nil {
 		t.Fatalf("Inspect error: %v", err)
 	}
@@ -247,6 +252,42 @@ func TestInspectNeverRunsFromProjectRoot(t *testing.T) {
 	}
 	if gotDir == resolvedProjectRoot {
 		t.Fatalf("probe ran with CWD = project root (%s); it must run from a neutral directory", gotDir)
+	}
+	if gotDir != probeDir {
+		t.Fatalf("probe ran with CWD = %s; production probes run from %s (no writable ancestors)", gotDir, probeDir)
+	}
+}
+
+// TestProbeDirHasNoWritableAncestors pins the property the working
+// directory exists for: nothing above it can be planted by an
+// unprivileged user, so a tool walking up from the cwd (yarn 1
+// .yarnrc yarn-path, pnpm package.json packageManager) finds nothing.
+func TestProbeDirHasNoWritableAncestors(t *testing.T) {
+	if probeDir != "/" {
+		t.Fatalf("probeDir = %q; the only directory with no ancestors is /", probeDir)
+	}
+	if filepath.Dir(probeDir) != probeDir {
+		t.Fatalf("probeDir %q has an ancestor", probeDir)
+	}
+}
+
+// TestInspectProbeSeesWalkerGuards proves the yarn/pnpm ancestor-walk
+// guards reach the child process even when the inherited environment
+// says the opposite.
+func TestInspectProbeSeesWalkerGuards(t *testing.T) {
+	t.Setenv("YARN_IGNORE_PATH", "0")
+	t.Setenv("npm_config_manage_package_manager_versions", "true")
+	t.Setenv("NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS", "true")
+	dir := t.TempDir()
+	path := writeFakeTool(t, dir, "yarn",
+		`if [ "$YARN_IGNORE_PATH" = "1" ] && [ "$npm_config_manage_package_manager_versions" = "false" ] && [ -z "$NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS" ]; then echo 1.0.0; else echo 9.9.9; fi`+"\n")
+	insp := newTestInspector(staticResolver(map[string]string{"yarn": path}), probeDir)
+	obs, err := insp.Inspect(context.Background(), core.Requirement{Name: "yarn"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs.Version != "1.0.0" {
+		t.Fatalf("walker guards did not reach the probe (reported %q)", obs.Version)
 	}
 }
 

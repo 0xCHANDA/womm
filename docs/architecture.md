@@ -175,7 +175,18 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
   `/usr/local/bin/pnpm` must neither download a package manager nor
   rewrite a `package.json` during a version probe. An uncached shim
   fails fast and is reported as unreachable.
-- Neutral working directory (`os.TempDir()`), never the project root.
+- Working directory `/` — never the project root, and with no
+  ancestor an unprivileged user can write to. This matters: yarn 1
+  walks up from the cwd for `.yarnrc` `yarn-path` and executes that
+  file even for `--version`; pnpm walks up for a `package.json`
+  `packageManager` and downloads + runs that version. `os.TempDir()`
+  (world-writable `/tmp`, or an inherited, possibly relative
+  `$TMPDIR`) would hand both an attacker-chosen ancestor. The probe
+  environment additionally forces `YARN_IGNORE_PATH=1` and
+  `npm_config_manage_package_manager_versions=false`.
+- Ctrl-C / SIGTERM cancel the CLI context; cancellation kills the
+  running probe's process group, so a hung tool does not outlive
+  WOMM.
 - Hard 5s timeout, process-group `SIGKILL` on cancel (`Setpgid` +
   negative-PID kill), `WaitDelay` (2s) as backstop, output capped at
   4KiB. A descendant that leaves the process group (`setsid`) cannot

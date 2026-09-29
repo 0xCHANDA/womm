@@ -46,6 +46,14 @@ as future is implemented. PRs update this file; they don't improvise.
   satisfies anything, so such declarations are now explicit errors in
   the detector and `unknown` in compare instead of a possible false
   PASS. Fuzzed.
+- **Hardening: probe cwd** (PR #15, from independent adversarial
+  review) — probes ran from `os.TempDir()`: yarn 1 executes
+  `.yarnrc` `yarn-path` found by walking up from the cwd (even for
+  `--version`), pnpm downloads and runs an ancestor `packageManager`;
+  `/tmp` is world-writable and `$TMPDIR` may be relative. Now cwd is
+  `/`, plus `YARN_IGNORE_PATH=1` and
+  `npm_config_manage_package_manager_versions=false`; Ctrl-C cancels
+  the probe.
 - **Hardening: probe environment** (PR #12) — Corepack forced
   offline/passive in every probe (no downloads, no package.json
   auto-pin); bounded return proven against a `setsid`-escaped

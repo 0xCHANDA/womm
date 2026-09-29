@@ -80,9 +80,13 @@ type NodeInspector struct {
 	// touching the real machine or its PATH.
 	resolvePath func(name string) (string, error)
 	// runDir is the working directory every probe executes from. It
-	// must never be the inspected project's root — defense in depth
-	// against a binary whose behavior depends on its CWD or on
-	// discovering project-local config by walking up from it.
+	// must never be the inspected project's root, and must have no
+	// ancestor an unprivileged user can write to: yarn 1 walks up from
+	// the cwd looking for .yarnrc `yarn-path` and executes that file
+	// even for --version; pnpm walks up for a package.json
+	// `packageManager` and downloads+runs that version. A shared
+	// temp dir (/tmp) or an inherited $TMPDIR would hand both of them
+	// an attacker-chosen ancestor. See probeDir.
 	runDir string
 	// timeout bounds each probe. Production code always uses
 	// probeTimeout; only same-package tests shrink it, to keep the
@@ -90,13 +94,22 @@ type NodeInspector struct {
 	timeout time.Duration
 }
 
+// probeDir is the working directory of every production probe: the
+// filesystem root. It has no ancestors at all, so nothing a tool walks
+// up to (.yarnrc, .yarnrc.yml, .npmrc, package.json) can be planted by
+// anyone but root, and it is never the project. os.TempDir() was the
+// previous choice and is wrong on both counts: /tmp is world-writable
+// and $TMPDIR is inherited verbatim (a relative value points into the
+// project).
+const probeDir = "/"
+
 // NewNodeInspector returns a NodeInspector configured for production
-// use: real sanitized-PATH resolution, the system temp directory as a
-// neutral working directory, and the full 5-second probe timeout.
+// use: real sanitized-PATH resolution, the filesystem root as the
+// working directory, and the full 5-second probe timeout.
 func NewNodeInspector() *NodeInspector {
 	return &NodeInspector{
 		resolvePath: resolveSystemPath,
-		runDir:      os.TempDir(),
+		runDir:      probeDir,
 		timeout:     probeTimeout,
 	}
 }
@@ -252,6 +265,13 @@ var strippedEnvKeys = []string{
 	"COREPACK_ENABLE_NETWORK",
 	"COREPACK_ENABLE_AUTO_PIN",
 	"COREPACK_ENABLE_STRICT",
+	// yarn 1 gates .yarnrc `yarn-path` (arbitrary JS run before any
+	// command) on this; pnpm gates its self-version-management
+	// (download + run of the packageManager pinned by an ancestor
+	// package.json) on the other. Both replaced by forcedEnv.
+	"YARN_IGNORE_PATH",
+	"npm_config_manage_package_manager_versions",
+	"NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS",
 }
 
 // forcedEnv are the variables every probe gets with fixed values,
@@ -265,11 +285,20 @@ var strippedEnvKeys = []string{
 // out of it, so both behaviors are disabled: with the network off, an
 // uncached shim fails fast and the target is reported as unreachable
 // — truthfully, WOMM could not query it.
+//
+// YARN_IGNORE_PATH=1 makes yarn 1 ignore any `yarn-path` it finds;
+// npm_config_manage_package_manager_versions=false makes pnpm answer
+// with the binary that was actually invoked instead of fetching the
+// version an ancestor package.json pins. Together with probeDir these
+// are belt and suspenders: the cwd has no ancestors to walk, and the
+// walkers are told not to act on what they would find.
 var forcedEnv = []string{
 	"PATH=" + strings.Join(systemPathDirs, string(os.PathListSeparator)),
 	"COREPACK_ENABLE_NETWORK=0",
 	"COREPACK_ENABLE_AUTO_PIN=0",
 	"COREPACK_ENABLE_STRICT=0",
+	"YARN_IGNORE_PATH=1",
+	"npm_config_manage_package_manager_versions=false",
 }
 
 // boundedWriter caps how many bytes it will actually retain; bytes

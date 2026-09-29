@@ -18,7 +18,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 )
@@ -69,7 +71,14 @@ func newVersionCmd() *cobra.Command {
 // Execute runs the root command and maps errors to the public exit-code
 // contract: usage errors exit 2, execution errors exit 3.
 func Execute() {
-	os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
+	// Ctrl-C / SIGTERM cancel the context, which kills any running
+	// probe's whole process group (see inspect/node). Without this a
+	// hung probe would outlive WOMM: the probe runs in its own process
+	// group, so the terminal's SIGINT never reaches it directly.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }
 
 // run executes the CLI with explicit arguments and streams and returns
