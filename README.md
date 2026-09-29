@@ -168,11 +168,13 @@ that failed before the tool was even found) are printed on stderr as
   installed under `$HOME` by a version manager is reported as absent
   (or shadowed by the system one); the report shows what was actually
   observed.
-- Fixed `--version` argument, no shell, neutral working directory
-  (never the project root).
-- `NODE_OPTIONS` stripped; Corepack forced offline and passive
-  (`COREPACK_ENABLE_NETWORK=0`, no auto-pin): a probe cannot download
-  anything or edit a `package.json`.
+- Fixed `--version` argument, no shell, working directory `/` (never
+  the project root, no writable ancestors for yarn/pnpm to walk up
+  into).
+- `NODE_OPTIONS` stripped; Corepack forced offline and passive; yarn
+  `yarn-path` ignored; pnpm self-version-management disabled: a probe
+  cannot download anything, run project-chosen code or edit a
+  `package.json`.
 - 5-second timeout with process-group kill, 2-second wait backstop,
   output capped at 4 KiB.
 

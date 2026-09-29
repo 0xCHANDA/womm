@@ -36,10 +36,14 @@ candidate content for the first tag, to be cut by a human.
   only (a FIFO cannot block WOMM); reads bounded at 16 MiB
   (`womm.yaml`: 4 MiB). (#2, #11)
 - L1 containment: tools resolve only from `/usr/local/bin`,
-  `/usr/bin`, `/bin`; no shell; neutral working directory;
-  `NODE_OPTIONS` stripped; Corepack forced offline and passive; 5s
-  timeout with process-group kill and a 2s wait backstop; output
-  capped at 4 KiB. (#3, #12)
+  `/usr/bin`, `/bin`; no shell; working directory `/` (no writable
+  ancestors: yarn 1 `yarn-path` and pnpm self-version-management walk
+  up from the cwd and would execute attacker-chosen code from `/tmp`
+  or `$TMPDIR`); `NODE_OPTIONS` stripped; Corepack forced offline and
+  passive; `YARN_IGNORE_PATH=1`;
+  `npm_config_manage_package_manager_versions=false`; 5s timeout with
+  process-group kill and a 2s wait backstop; output capped at 4 KiB;
+  Ctrl-C kills a running probe. (#3, #12, #15)
 - Version ranges are gated on npm's grammar before evaluation
   (`>=22, <25`, `!=`, `=>`, `~>`, empty sets, `x.1.2`, `>x`, numbers
   beyond 2^64 are explicit errors, never a false PASS; prerelease
