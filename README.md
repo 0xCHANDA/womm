@@ -180,7 +180,8 @@ that failed before the tool was even found) are printed on stderr as
 - 5-second timeout with process-group kill, 2-second wait backstop,
   output capped at 4 KiB.
 
-Full detail: [`docs/architecture.md`](docs/architecture.md).
+Full detail: [`docs/architecture.md`](docs/architecture.md); who
+controls what: [`docs/threat-model.md`](docs/threat-model.md).
 
 ## Development
 

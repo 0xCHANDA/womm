@@ -19,7 +19,7 @@ var errExecutableNotFound = errors.New("executable not found in sanitized system
 // intentionally ignores the process's inherited PATH: an untrusted
 // project can shadow system tools by placing entries earlier on PATH
 // (./node_modules/.bin, a project-local shim, a bare "."), and WOMM
-// must never resolve or execute those. Linux-only for v0.0.1 — extend
+// must never resolve or execute those. Linux-only for v0.1 — extend
 // deliberately, with justification, if a later PR adds another OS.
 var systemPathDirs = []string{
 	"/usr/local/bin",

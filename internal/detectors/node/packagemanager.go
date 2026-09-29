@@ -82,7 +82,7 @@ func (PackageManagerDetector) Detect(_ context.Context, projectRoot string) ([]c
 }
 
 // corepackHashAlgorithms is the explicit set of Corepack integrity-hash
-// algorithms WOMM v0.0.1 supports, mapped to the exact hex digest length
+// algorithms WOMM v0.1 supports, mapped to the exact hex digest length
 // each algorithm produces.
 //
 // The subset is justified by direct evidence in the current Corepack
@@ -100,7 +100,7 @@ func (PackageManagerDetector) Detect(_ context.Context, projectRoot string) ([]c
 //     checksum forms in Corepack sources or docs (the SHA256 in
 //     verifySignature is npm registry signature verification, not a
 //     descriptor hash), so they are NOT claimed as supported in
-//     v0.0.1. WOMM represents what we know, not what probably works.
+//     v0.1. WOMM represents what we know, not what probably works.
 //
 // `+garbage` suffixes, unknown algorithms and wrong-length digests are
 // all explicit errors, never silently stripped: they are not syntax we
@@ -116,7 +116,7 @@ var corepackHexDigest = regexp.MustCompile(`^[0-9a-f]+$`)
 
 // validateCorepackHash validates a Corepack integrity hash WITHOUT the
 // leading "+" (e.g. `sha1.0123…`): the algorithm must be in the
-// supported v0.0.1 subset and the digest must be lowercase hex of the
+// supported v0.1 subset and the digest must be lowercase hex of the
 // exact length that algorithm produces.
 func validateCorepackHash(hash string) error {
 	algo, digest, ok := strings.Cut(hash, ".")
@@ -125,7 +125,7 @@ func validateCorepackHash(hash string) error {
 	}
 	wantLen, supported := corepackHashAlgorithms[algo]
 	if !supported {
-		return fmt.Errorf("integrity hash algorithm %q is not supported by WOMM v0.0.1 (supported: sha1, sha224, sha512)", algo)
+		return fmt.Errorf("integrity hash algorithm %q is not supported by WOMM v0.1 (supported: sha1, sha224, sha512)", algo)
 	}
 	if !corepackHexDigest.MatchString(digest) {
 		return fmt.Errorf("integrity hash digest %q must be lowercase hexadecimal", digest)
@@ -154,7 +154,7 @@ func validateCorepackHash(hash string) error {
 //   - Corepack URLs (yarn@https://…) are unsupported at this stage.
 func splitPackageManager(pm string) (string, string, error) {
 	if strings.Contains(pm, "://") {
-		return "", "", fmt.Errorf("corepack URLs are not supported by WOMM v0.0.1")
+		return "", "", fmt.Errorf("corepack URLs are not supported by WOMM v0.1")
 	}
 	name, version, ok := strings.Cut(pm, "@")
 	if !ok || name == "" || version == "" {

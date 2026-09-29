@@ -40,7 +40,7 @@ func (c candNode) asRequirement(name string) core.Requirement {
 // NodeDetector reads the project's explicit Node.js requirements from
 // package.json (engines.node) and .nvmrc.
 //
-// Consolidation policy for v0.0.1 (chosen so the detector can never
+// Consolidation policy for v0.1 (chosen so the detector can never
 // emit a model the schema rejects — duplicate names are invalid):
 //
 //	engines only              → Requirement{node, engines constraint}
@@ -52,7 +52,7 @@ func (c candNode) asRequirement(name string) core.Requirement {
 //
 // The both-sources result is not "picking .nvmrc": the conjunction
 // `Node >=20 AND Node ==22.14.0` is exactly `Node ==22.14.0`.
-// The generic range-intersection problem is out of scope for v0.0.1:
+// The generic range-intersection problem is out of scope for v0.1:
 // EVIDENCE_CONFLICT means provably incompatible, never "no witness
 // found".
 //

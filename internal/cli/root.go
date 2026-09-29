@@ -42,8 +42,8 @@ func newRootCmd() *cobra.Command {
 		Use:   "womm",
 		Short: "Works On My Machine — development environment diagnostics",
 		Long: "Works On My Machine (womm) is an evidence-based CLI that " +
-			"discovers project requirements, verifies local environments " +
-			"and explains meaningful differences between machines.\n\n" +
+			"discovers a project's declared requirements and verifies " +
+			"whether this machine satisfies them.\n\n" +
 			"v0.1 (Linux + Node.js): `capture` writes a project's declared " +
 			"requirements to womm.yaml; `verify` checks this machine against " +
 			"them and exits 0/1/2/3 (see `womm verify --help`).",
