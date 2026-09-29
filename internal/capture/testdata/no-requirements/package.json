@@ -1,0 +1,1 @@
+{ "name": "fixture-none", "scripts": { "test": "echo should-never-run" } }

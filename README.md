@@ -17,7 +17,7 @@ requirements.
 - [x] L1 machine inspection (`NodeInspector`: node/npm/pnpm/yarn, sanitized + bounded probes)
 - [x] Requirement comparison (pure `compare` engine: exact/range/present, prerelease-vs-range refused explicitly)
 - [x] Reporting (deterministic `[]core.Match` rendering); exit code 1 arrives with `verify`
-- [ ] `capture`
+- [x] `capture` (`womm capture [dir]` → deterministic `womm.yaml`)
 - [ ] `verify`
 - [ ] final E2E
 
@@ -28,6 +28,7 @@ Merged:
 - PR #3 — `NodeInspector` (L1 machine inspection)
 - PR #4 — Requirement comparison (pure `compare` engine)
 - PR #6 — Reporting (deterministic rendering of matches)
+- PR #7 — `womm capture`
 
 ## Build
 
@@ -51,6 +52,33 @@ Architecture, roadmap and the agent workflow for coding sessions:
 ```sh
 womm --help
 womm version
+womm capture [project-dir]        # writes <project-dir>/womm.yaml
+womm capture -o out.yaml --force  # custom output; overwrite a regular file
+```
+
+`capture` reads only explicit declarations (`package.json`
+`engines.node` / `packageManager`, `.nvmrc`), never runs project code
+and never inspects the machine. Conflicting or unsupported
+declarations are errors (exit 3), not guesses. Example output:
+
+```yaml
+version: 1
+requirements:
+  - name: node
+    constraint: 24.7.0
+    evidence:
+      - source: package.json
+        field: engines.node
+        value: '>=22 <25'
+      - source: .nvmrc
+        field: version
+        value: v24.7.0
+  - name: pnpm
+    constraint: 10.15.1
+    evidence:
+      - source: package.json
+        field: packageManager
+        value: pnpm@10.15.1
 ```
 
 ## Roadmap

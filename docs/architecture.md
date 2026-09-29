@@ -20,14 +20,15 @@ comparison is pure logic; reporting is presentation only.
 | Package | Layer | Status | Responsibility |
 |---|---|---|---|
 | `cmd/womm` | CLI | merged (PR 1) | `main` → `internal/cli.Execute` |
-| `internal/cli` | CLI | merged (PR 1) | cobra root + `version`; exit-code contract 0/1/2/3 (1 reserved, not produced yet) |
+| `internal/cli` | CLI | merged (PR 1, PR 7) | cobra root + `version` + `capture`; exit-code contract 0/1/2/3 (1 reserved, not produced yet); a fresh command tree per run |
 | `internal/core` | domain | merged (PR 1) | ecosystem-agnostic model: `Requirement`, `Evidence`, `Observation`, `Match`, `MatchStatus` |
-| `internal/schema` | persistence | merged (PR 1) | `womm.yaml` schema v1: load, parse, validate; version-policy errors (`ErrVersion`), unknown-keys → warnings |
+| `internal/schema` | persistence | merged (PR 1, PR 7) | `womm.yaml` schema v1: load, parse, validate, `Marshal` (deterministic, validated, round-trip safe); version-policy errors (`ErrVersion`), unknown-keys → warnings |
 | `internal/detectors` | L0 | merged (PR 2) | `Detector` boundary: project filesystem reads only → `core.Requirement` |
 | `internal/detectors/node` | L0 | merged (PR 2) | `NodeDetector` (package.json `engines.node` + `.nvmrc`, conflict-safe) and `PackageManagerDetector` (`packageManager`, Corepack hash subset) |
 | `internal/inspect` | L1 | merged (PR 3) | `Inspector` boundary: demand-driven machine observation → `core.Observation` |
 | `internal/inspect/node` | L1 | merged (PR 3) | `NodeInspector`: node/npm/pnpm/yarn `--version` probes with full L1 containment |
 | `internal/compare` | logic | merged (PR 4) | pure `Compare(req, obs) → core.Match`; exact versions by equality, ranges for release versions only, prerelease-vs-range refused |
+| `internal/capture` | orchestration (L0) | merged (PR 7) | `Capture(root)`: run the fixed detector set → sorted `schema.File`; `Write(path, file, force)`: never follows symlinks, never overwrites without `--force` |
 | `internal/report` | presentation | merged (PR 6) | `Render([]core.Match)`: deterministic order + wording, `Summarize` counts; no inspection, no comparison, no exit codes |
 
 ## Data flow (current and planned)
@@ -59,8 +60,16 @@ comparison is pure logic; reporting is presentation only.
    included), the reason and every evidence entry, then a summary
    line. `report.Summarize` counts statuses. An unknown status is
    `ErrUnknownStatus` before any byte is written. Presentation only.
-5. **CLI (future).** Exit-code mapping. Exit 1 will mean semantic
-   FAIL; nothing produces it today.
+5. **Capture (`womm capture [dir]`).** `capture.Capture` runs the
+   fixed detector set on the project, refuses duplicate names,
+   sorts requirements by name and validates the result;
+   `capture.Write` serializes through `schema.Marshal`, parses the
+   bytes back, and stores them at `<dir>/womm.yaml` (or `--output`).
+   Existing files need `--force`; a symlink at the output path is
+   refused in both modes (a project could point `womm.yaml` at any
+   file). Detection errors abort with exit 3 and nothing is written.
+6. **CLI (future).** `verify` and exit-code mapping. Exit 1 will mean
+   semantic FAIL; nothing produces it today.
 
 ## Boundaries and dependencies (enforced)
 
@@ -84,7 +93,8 @@ next slices (`docs/roadmap.md`):
 2. `internal/report` is merged but not wired to the CLI.
 3. The CLI produces 0/2/3 only; exit 1 (semantic FAIL) is part of the
    public contract but not produced until verify exists.
-4. `capture` / `verify` commands do not exist.
+4. `verify` does not exist; `capture` does not detect conflicts with
+   an existing womm.yaml (`--force` overwrites, it never merges).
 
 ## Security invariants (invariant — do not weaken)
 
@@ -93,6 +103,12 @@ next slices (`docs/roadmap.md`):
   resolves symlinks and refuses to read outside the project root.
 - A broken symlink in a declared source is an explicit error, not
   silent absence (declaration implies source).
+
+**Capture output (`internal/capture`):**
+- The output path is `Lstat`ed and opened with `O_NOFOLLOW`
+  (`O_EXCL` without `--force`): a symlink planted as `womm.yaml` is
+  never followed, and nothing can be written outside the path the
+  user named.
 
 **L1 — machine probes (`internal/inspect/node`):**
 - Executables resolve only from a hardcoded allowlist

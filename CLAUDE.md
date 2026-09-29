@@ -44,11 +44,12 @@ Where things live (on `main`; see `docs/architecture.md` for detail):
 | Piece | Location | Notes |
 |---|---|---|
 | Entry point | `cmd/womm/main.go` | calls `internal/cli.Execute` |
-| CLI | `internal/cli` | cobra; `version` only; exit-code contract 0/1/2/3 (1 reserved) |
+| CLI | `internal/cli` | cobra; `version`, `capture`; exit-code contract 0/1/2/3 (1 reserved) |
 | Domain model | `internal/core` | `Requirement`, `Observation`, `Evidence`, `Match`, `MatchStatus` |
-| Schema v1 | `internal/schema` | `womm.yaml` load/validate/parse |
+| Schema v1 | `internal/schema` | `womm.yaml` load/validate/parse/marshal |
 | Detection (L0) | `internal/detectors` + `internal/detectors/node` | `NodeDetector`, `PackageManagerDetector` |
 | Inspection (L1) | `internal/inspect` + `internal/inspect/node` | `NodeInspector` (node/npm/pnpm/yarn) |
+| Capture | `internal/capture` | detectors → sorted `schema.File`; symlink-safe `Write` |
 | Comparison | `internal/compare` | pure `Compare`; exact/range/present; prerelease-vs-range refused |
 | Reporting | `internal/report` | `Render`/`Summarize`; presentation only, not wired to the CLI |
 
