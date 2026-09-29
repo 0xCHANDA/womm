@@ -3,6 +3,7 @@ package schema
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strconv"
@@ -20,12 +21,36 @@ var ErrMalformed = errors.New("womm.yaml is not valid YAML")
 // and an error for malformed YAML, version incompatibility or schema
 // violations. Warnings never make Load fail.
 func Load(path string) (*File, []string, error) {
-	data, err := os.ReadFile(path)
+	info, err := os.Stat(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot read %s: %w", path, err)
 	}
+	if !info.Mode().IsRegular() {
+		// A FIFO or device would block the read forever; a directory
+		// is not a file. Never guessed around, never waited on.
+		return nil, nil, fmt.Errorf("cannot read %s: not a regular file (%s)", path, info.Mode().Type())
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("cannot read %s: %w", path, err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, MaxFileBytes+1))
+	if err != nil {
+		return nil, nil, fmt.Errorf("cannot read %s: %w", path, err)
+	}
+	if len(data) > MaxFileBytes {
+		return nil, nil, fmt.Errorf("cannot read %s: %w (%d bytes)", path, ErrTooLarge, MaxFileBytes)
+	}
 	return Parse(data)
 }
+
+// MaxFileBytes bounds the size of a womm.yaml Load will read. The file
+// describes a handful of requirements; anything larger is not one.
+const MaxFileBytes = 4 << 20
+
+// ErrTooLarge marks a womm.yaml above MaxFileBytes.
+var ErrTooLarge = errors.New("womm.yaml exceeds the size limit")
 
 // Parse validates YAML bytes according to schema v1. It does not touch
 // the filesystem and never executes anything (PR 1: filesystem reads

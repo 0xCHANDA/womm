@@ -3,6 +3,8 @@ package schema
 import (
 	"errors"
 	"fmt"
+	"unicode"
+	"unicode/utf8"
 )
 
 // ErrVersion identifies the family of version-policy violations:
@@ -19,6 +21,9 @@ func validate(f *File) error {
 		r := &f.Requirements[i]
 		if r.Name == "" {
 			return fmt.Errorf("requirements[%d]: name is required", i)
+		}
+		if !validName(r.Name) {
+			return fmt.Errorf("requirements[%d]: name %q must not contain whitespace or control characters", i, r.Name)
 		}
 		if names[r.Name] {
 			return fmt.Errorf("requirements[%d]: duplicate name %q", i, r.Name)
@@ -58,4 +63,21 @@ func Validate(f *File) error {
 		return &versionError{present: true, stated: fmt.Sprintf("%d", f.Version), obsolete: f.Version < 1}
 	}
 	return validate(f)
+}
+
+// validName reports whether name can stand as a requirement identifier:
+// non-empty, valid UTF-8, no whitespace, no control characters. Names
+// are matched against inspector tool names and printed on their own
+// report line, so a name that can break a line or hide characters is
+// refused.
+func validName(name string) bool {
+	if name == "" || !utf8.ValidString(name) {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }

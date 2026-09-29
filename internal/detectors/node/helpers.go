@@ -1,7 +1,9 @@
 package node
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,7 +63,21 @@ func readFileIfPresent(projectRoot, name string) ([]byte, bool, error) {
 		return nil, false, fmt.Errorf("%s escapes the project root; refusing to read outside the project (L0 contract)", full)
 	}
 
-	data, err := os.ReadFile(target)
+	// Only regular files are sources. A FIFO or device planted under a
+	// declared name would block the read (and WOMM) forever; a
+	// directory is not a declaration either.
+	info, err := os.Stat(target)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("cannot read %s: %w", full, err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, false, fmt.Errorf("%s is not a regular file (%s); refusing to read it", full, info.Mode().Type())
+	}
+
+	data, err := readBounded(target, maxSourceBytes)
 	if os.IsNotExist(err) {
 		return nil, false, nil
 	}
@@ -69,4 +85,31 @@ func readFileIfPresent(projectRoot, name string) ([]byte, bool, error) {
 		return nil, false, fmt.Errorf("cannot read %s: %w", full, err)
 	}
 	return data, true, nil
+}
+
+// maxSourceBytes bounds every declared-source read. package.json and
+// .nvmrc are small by nature; a project cannot make WOMM allocate
+// arbitrary memory by growing them.
+const maxSourceBytes = 16 << 20
+
+// errSourceTooLarge marks a declared source above maxSourceBytes.
+var errSourceTooLarge = errors.New("declared source exceeds the size limit")
+
+// readBounded reads at most limit bytes from path and fails
+// explicitly when the file is larger, instead of truncating it (a
+// truncated declaration would be interpreted as something else).
+func readBounded(path string, limit int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w (%d bytes)", errSourceTooLarge, limit)
+	}
+	return data, nil
 }

@@ -130,7 +130,8 @@ CI (`.github/workflows/ci.yml`) re-runs these plus a
 
 - **L0 filesystem containment** (`internal/detectors/node/helpers.go`):
   reads resolve symlinks and refuse to read anything outside the
-  project root; broken symlinks in declared sources are errors.
+  project root; broken symlinks in declared sources are errors;
+  regular files only, bounded to 16 MiB (womm.yaml: 4 MiB).
 - **L1 system-path allowlist** (`internal/inspect/node/path.go`):
   executables resolve only from `/usr/local/bin`, `/usr/bin`, `/bin`
   — never the inherited `PATH`, never the project tree.

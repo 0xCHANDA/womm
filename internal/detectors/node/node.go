@@ -1,6 +1,7 @@
 package node
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -73,15 +74,16 @@ func (NodeDetector) Detect(_ context.Context, projectRoot string) ([]core.Requir
 	}
 	var engines *candNode
 	if hasPkg {
-		var pkg packageJSON
-		if err := json.Unmarshal(pkgData, &pkg); err != nil {
-			return nil, fmt.Errorf("%s: malformed package.json (declared source, cannot be interpreted safely): %w", pkgPath, err)
+		pkg, err := parsePackageJSON(pkgPath, pkgData)
+		if err != nil {
+			return nil, err
 		}
 		if enginesNode := strings.TrimSpace(pkg.Engines.Node); enginesNode != "" {
-			if !supportsConstraint(enginesNode) {
+			normalized, err := semverrange.Normalize(enginesNode)
+			if err != nil {
 				return nil, unsupportedConstraint("package.json → engines.node", enginesNode)
 			}
-			engines = &candNode{constraint: enginesNode, source: "package.json", field: "engines.node", value: pkg.Engines.Node}
+			engines = &candNode{constraint: normalized, source: "package.json", field: "engines.node", value: pkg.Engines.Node}
 		}
 	}
 
@@ -197,6 +199,23 @@ func isKeyValueReserved(t string) bool {
 		}
 	}
 	return true
+}
+
+// utf8BOM is the byte-order mark some editors prepend to JSON files.
+// npm's own package.json reader strips it; so does WOMM, explicitly
+// and only this exact prefix — everything else must be strict JSON.
+var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
+
+// parsePackageJSON decodes the declarative surface of package.json.
+// Any syntax problem is an explicit error: a declared source that
+// cannot be interpreted is never treated as absent.
+func parsePackageJSON(path string, data []byte) (packageJSON, error) {
+	var pkg packageJSON
+	data = bytes.TrimPrefix(data, utf8BOM)
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return packageJSON{}, fmt.Errorf("%s: malformed package.json (declared source, cannot be interpreted safely): %w", path, err)
+	}
+	return pkg, nil
 }
 
 // packageJSON is the minimal declarative surface read from
