@@ -32,7 +32,7 @@ first). See `docs/roadmap.md` for what is real vs. pending.
 Detector (project, L0)  → core.Requirement (+ Evidence)
 Inspector (machine, L1) → core.Observation
 Compare                 → core.Match
-Reporting               → CLI  (not implemented yet)
+Reporting (internal/report) → CLI (not wired yet)
 ```
 
 Frontier rule: **Detected ≠ Required, Observed ≠ Verified** — the
@@ -50,7 +50,7 @@ Where things live (on `main`; see `docs/architecture.md` for detail):
 | Detection (L0) | `internal/detectors` + `internal/detectors/node` | `NodeDetector`, `PackageManagerDetector` |
 | Inspection (L1) | `internal/inspect` + `internal/inspect/node` | `NodeInspector` (node/npm/pnpm/yarn) |
 | Comparison | `internal/compare` | pure `Compare`; exact/range/present; prerelease-vs-range refused |
-| Reporting | — | does not exist yet |
+| Reporting | `internal/report` | `Render`/`Summarize`; presentation only, not wired to the CLI |
 
 ## Engineering principles
 
