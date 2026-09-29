@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/0xCHANDA/womm/internal/core"
 )
@@ -232,8 +233,26 @@ func TestRenderEscapesControlCharacters(t *testing.T) {
 	}
 }
 
+func TestRenderAlignsNonASCIINames(t *testing.T) {
+	ms := []core.Match{
+		{Requirement: core.Requirement{Name: "npm", Constraint: "present"}, Observation: core.Observation{Name: "npm", Present: true}, Status: core.StatusPass, Reason: "r"},
+		{Requirement: core.Requirement{Name: "nœud", Constraint: "present"}, Observation: core.Observation{Name: "nœud", Present: true}, Status: core.StatusPass, Reason: "r"},
+	}
+	var buf bytes.Buffer
+	if err := Render(&buf, ms); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(buf.String(), "\n")
+	a, b := lines[0], lines[2]
+	if ia, ib := strings.Index(a, " required "), strings.Index(b, " required "); utf8.RuneCountInString(a[:ia]) != utf8.RuneCountInString(b[:ib]) {
+		t.Errorf("name column misaligned for non-ASCII names:\n%s\n%s", a, b)
+	}
+}
+
 func TestPrintable(t *testing.T) {
 	cases := map[string]string{
+		"a\u2028b":      `"a\u2028b"`,
+		"a\u2029b":      `"a\u2029b"`,
 		"node":          "node",
 		"ñode 日本":       "ñode 日本",
 		"a\tb":          `"a\tb"`,
