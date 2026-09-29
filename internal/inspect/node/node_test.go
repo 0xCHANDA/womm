@@ -673,3 +673,64 @@ func TestInspectReturnsEvenIfDescendantEscapesGroup(t *testing.T) {
 		t.Fatalf("live adopted children remain: %v", left)
 	}
 }
+
+// --- inherited home / cache / loader variables --------------------------------
+
+// TestSanitizedEnvForcesAccountHome pins that HOME and COREPACK_HOME in
+// the probe come from the account's passwd entry, never from the
+// inherited environment (a Corepack shim executes whatever sits in its
+// cache directory), and that loader/coverage injection variables are
+// gone.
+func TestSanitizedEnvForcesAccountHome(t *testing.T) {
+	t.Setenv("HOME", "/evil/project")
+	t.Setenv("COREPACK_HOME", "/evil/project/.corepack")
+	t.Setenv("XDG_CACHE_HOME", "/evil/project/.cache")
+	t.Setenv("XDG_CONFIG_HOME", "/evil/project/.config")
+	t.Setenv("LD_PRELOAD", "/evil/evil.so")
+	t.Setenv("LD_AUDIT", "/evil/audit.so")
+	t.Setenv("LD_LIBRARY_PATH", "/evil/lib")
+	t.Setenv("NODE_V8_COVERAGE", "/evil/cov")
+	t.Setenv("NODE_REDIRECT_WARNINGS", "/evil/warn")
+
+	env := sanitizedEnv()
+	value := map[string]string{}
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		if _, dup := value[k]; dup {
+			t.Errorf("%s appears twice", k)
+		}
+		value[k] = v
+	}
+	for _, k := range []string{"XDG_CACHE_HOME", "XDG_CONFIG_HOME", "LD_PRELOAD", "LD_AUDIT", "LD_LIBRARY_PATH", "NODE_V8_COVERAGE", "NODE_REDIRECT_WARNINGS"} {
+		if _, present := value[k]; present {
+			t.Errorf("%s survived sanitization", k)
+		}
+	}
+	if value["HOME"] != accountHome || strings.HasPrefix(value["HOME"], "/evil") {
+		t.Errorf("HOME = %q, want the account home %q", value["HOME"], accountHome)
+	}
+	if value["COREPACK_HOME"] != accountHome+"/.cache/node/corepack" {
+		t.Errorf("COREPACK_HOME = %q", value["COREPACK_HOME"])
+	}
+	if !filepath.IsAbs(accountHome) {
+		t.Errorf("accountHome %q is not absolute", accountHome)
+	}
+}
+
+// TestInspectProbeSeesAccountHome proves the forced values reach the
+// child: a shim that echoes its HOME must not see the hostile one.
+func TestInspectProbeSeesAccountHome(t *testing.T) {
+	t.Setenv("HOME", "/evil/project")
+	t.Setenv("COREPACK_HOME", "/evil/project/.corepack")
+	dir := t.TempDir()
+	path := writeFakeTool(t, dir, "pnpm",
+		`case "$HOME" in /evil*) echo 9.9.9;; *) case "$COREPACK_HOME" in "$HOME"/.cache/node/corepack) echo 1.0.0;; *) echo 8.8.8;; esac;; esac`+"\n")
+	insp := newTestInspector(staticResolver(map[string]string{"pnpm": path}), probeDir)
+	obs, err := insp.Inspect(context.Background(), core.Requirement{Name: "pnpm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs.Version != "1.0.0" {
+		t.Fatalf("probe saw the inherited HOME/COREPACK_HOME (reported %q)", obs.Version)
+	}
+}

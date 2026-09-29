@@ -48,7 +48,10 @@ candidate content for the first tag, to be cut by a human.
   up from the cwd and would execute attacker-chosen code from `/tmp`
   or `$TMPDIR`); `NODE_OPTIONS` stripped; Corepack forced offline and
   passive; `YARN_IGNORE_PATH=1`;
-  `npm_config_manage_package_manager_versions=false`; 5s timeout with
+  `npm_config_manage_package_manager_versions=false`; `HOME` and
+  `COREPACK_HOME` forced from the account's passwd entry, `XDG_*`
+  cache/config, `LD_PRELOAD`/`LD_AUDIT`/`LD_LIBRARY_PATH`,
+  `NODE_V8_COVERAGE`/`NODE_REDIRECT_WARNINGS` stripped (#33); 5s timeout with
   process-group kill and a 2s wait backstop; output capped at 4 KiB;
   Ctrl-C kills a running probe and yields no verdict (no partial
   report, exit 3); WOMM is a child subreaper so a `setsid`-escaped
