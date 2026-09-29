@@ -53,8 +53,9 @@ type Result struct {
 // supports it and compares the outcome. It never stops early on a
 // failed requirement: the caller gets every match and every
 // operational error. Context cancellation is the exception: once ctx
-// is done, remaining requirements are not probed and the cancellation
-// is recorded as an error.
+// is done, remaining requirements are not probed, a probe interrupted
+// by the cancellation is an operational error (never an unreachable
+// verdict), and Cancelled(res) reports the situation to callers.
 //
 // Mapping rules, applied per requirement:
 //
@@ -104,6 +105,14 @@ func Verify(ctx context.Context, f *schema.File, inspectors []inspect.Inspector)
 
 		obs, err := insp.Inspect(ctx, req)
 		if err != nil {
+			if cerr := ctx.Err(); cerr != nil {
+				// The probe did not fail; WOMM was told to stop. That
+				// says nothing about the machine, so it is never an
+				// unreachable verdict — an operational error, and the
+				// loop above records the rest as cancelled too.
+				res.Errors = append(res.Errors, fmt.Errorf("%s: verification cancelled during inspection: %w", req.Name, cerr))
+				continue
+			}
 			if obs.Present && obs.Name == req.Name && obs.Version == "" {
 				// Presence established, query failed: the target is
 				// there but WOMM could not ask it anything. That is
@@ -172,4 +181,16 @@ func ExitCode(r Result) int {
 		return ExitFail
 	}
 	return ExitPass
+}
+
+// Cancelled reports whether r carries a cancellation error: the run was
+// interrupted and its matches are partial. Callers must not present
+// them as a verdict.
+func Cancelled(r Result) bool {
+	for _, err := range r.Errors {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return true
+		}
+	}
+	return false
 }
