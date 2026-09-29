@@ -16,7 +16,7 @@
 //	hyphen     := partial ws "-" ws partial
 //	comparator := ( ">=" | "<=" | ">" | "<" | "=" | "^" | "~" )? ws* partial
 //	partial    := "v"? xr ( "." xr ( "." xr qualifier? )? )?
-//	xr         := "x" | "X" | "*" | nr           (nr: 0 | [1-9][0-9]*, < 2^64)
+//	xr         := "x" | "X" | "*" | nr           (nr: 0 | [1-9][0-9]*, <= 2^53-1)
 //	qualifier  := ( "-" pre )? ( "+" build )?   (only on full x.y.z with no wildcard)
 //
 // Rejected on top of the grammar (see checkPartial): numeric components
@@ -43,6 +43,12 @@ var ErrSyntax = errors.New("unsupported version range syntax")
 // MaxLen bounds the accepted range length; longer inputs are refused
 // before any parsing.
 const MaxLen = 512
+
+// MaxNumeric is the largest numeric component npm accepts
+// (Number.MAX_SAFE_INTEGER, 2^53-1). node-semver rejects anything
+// above it at parse time; accepting more here would let WOMM PASS a
+// range npm cannot even read.
+const MaxNumeric = 1<<53 - 1
 
 const (
 	nr      = `(?:0|[1-9][0-9]*)`
@@ -147,9 +153,8 @@ func normalizeSet(set string) (string, error) {
 // the comparator's operator ("" for a bare version, "-" for a hyphen
 // range end), p the partial version.
 //
-//   - every numeric component must fit in 64 bits: npm rejects larger
-//     numbers at parse time, and Masterminds would fail later with an
-//     opaque error;
+//   - every numeric component must be at most MaxNumeric (2^53-1, npm's
+//     MAX_SAFE_INTEGER): npm rejects larger numbers at parse time;
 //   - once a component is a wildcard the rest must be wildcards too
 //     ("x.1.2", "1.x.3"): npm cannot parse the first and both are a
 //     meaningless spelling that would otherwise evaluate to something;
@@ -175,8 +180,8 @@ func checkPartial(op, p string) error {
 			if wildcard {
 				return fmt.Errorf("%w: numeric component after a wildcard in %q", ErrSyntax, p)
 			}
-			if _, err := strconv.ParseUint(part, 10, 64); err != nil {
-				return fmt.Errorf("%w: version component %q in %q is not a number below 2^64", ErrSyntax, part, p)
+			if n, err := strconv.ParseUint(part, 10, 64); err != nil || n > MaxNumeric {
+				return fmt.Errorf("%w: version component %q in %q exceeds npm's limit of %d", ErrSyntax, part, p, MaxNumeric)
 			}
 		}
 	}
