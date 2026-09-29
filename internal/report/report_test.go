@@ -205,3 +205,46 @@ func TestSummarize(t *testing.T) {
 		t.Errorf("error = %v, want ErrUnknownStatus", err)
 	}
 }
+
+// TestRenderEscapesControlCharacters pins that no value from a project
+// file, a hand-edited womm.yaml or a probed binary can break or forge a
+// report line: anything with a control character is rendered quoted.
+func TestRenderEscapesControlCharacters(t *testing.T) {
+	m := core.Match{
+		Requirement: core.Requirement{Name: "no\nde", Constraint: ">=22\n<25", Evidence: []core.Evidence{{Source: "package.json", Field: "engines.node", Value: ">=22\n<25"}}},
+		Observation: core.Observation{Name: "no\nde", Present: true, Version: "24.7.0\x1b[0m"},
+		Status:      core.StatusPass,
+		Reason:      "forged\nPASS        other required x; observed y",
+	}
+	var buf bytes.Buffer
+	if err := Render(&buf, []core.Match{m}); err != nil {
+		t.Fatal(err)
+	}
+	want := "PASS        \"no\\nde\" required \">=22\\n<25\"; observed \"24.7.0\\x1b[0m\"\n" +
+		"            \"forged\\nPASS        other required x; observed y\"\n" +
+		"            evidence: package.json → engines.node = \">=22\\n<25\"\n" +
+		"\n1 requirement: 1 pass, 0 fail, 0 unknown, 0 unreachable\n"
+	if got := buf.String(); got != want {
+		t.Errorf("Render output mismatch\n--- got ---\n%s--- want ---\n%s", got, want)
+	}
+	if lines := strings.Count(buf.String(), "\n"); lines != 5 {
+		t.Errorf("report has %d lines, want 5: a value must never add lines", lines)
+	}
+}
+
+func TestPrintable(t *testing.T) {
+	cases := map[string]string{
+		"node":          "node",
+		"ñode 日本":       "ñode 日本",
+		"a\tb":          `"a\tb"`,
+		"a\x00b":        `"a\x00b"`,
+		"\x1b[31mred":   `"\x1b[31mred"`,
+		"bad\xff":       `"bad\xff"`,
+		"tab and\r\nnl": `"tab and\r\nnl"`,
+	}
+	for in, want := range cases {
+		if got := printable(in); got != want {
+			t.Errorf("printable(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
