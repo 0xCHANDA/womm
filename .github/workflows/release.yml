@@ -5,8 +5,10 @@
 # Nothing here creates tags or publishes from main. The job builds
 # static Linux binaries for amd64 and arm64 with the version injected
 # from the tag, writes SHA-256 checksums, and attaches everything to a
-# GitHub Release for that tag. Builds are reproducible: -trimpath,
-# CGO disabled, fixed ldflags, GOTOOLCHAIN=local on the pinned Go.
+# GitHub Release for that tag. Builds are reproducible for a given Go
+# toolchain: -trimpath, CGO disabled, fixed ldflags, GOTOOLCHAIN=local
+# on the pinned Go line (setup-go resolves the newest 1.24.x patch; the
+# exact toolchain is printed in the job log).
 name: release
 
 on:
@@ -35,8 +37,13 @@ jobs:
       - name: validate
         run: |
           test -z "$(gofmt -l .)"
+          go version
+          cp go.mod go.mod.bak && cp go.sum go.sum.bak
+          go mod tidy
+          diff go.mod go.mod.bak && diff go.sum go.sum.bak && rm -f go.mod.bak go.sum.bak
           go vet ./...
           go test -count=1 ./...
+          go test -race ./...
 
       - name: build
         env:

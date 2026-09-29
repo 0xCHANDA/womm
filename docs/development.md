@@ -34,9 +34,9 @@ go build ./cmd/womm
 ./womm verify ./path/to/project   # exit 0/1/2/3
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of the above on every push and
-PR, plus a `go mod tidy` reproducibility check (drifting `go.mod` /
-`go.sum` fails the build).
+CI (`.github/workflows/ci.yml`) runs exactly the above on every push
+and PR, plus a `go mod tidy` reproducibility check (drifting `go.mod`
+/ `go.sum` fails the build).
 
 ## Layout
 
@@ -118,6 +118,10 @@ SEMVER_PATH=/path/to/node_modules/semver \
 - There are **no git tags and no releases yet**. `CHANGELOG.md` holds
   the candidate notes for the first tag; cutting the tag is a human
   decision, never an agent action.
+- Before tagging: rename the CHANGELOG section `[Unreleased] — v0.1.0
+  candidate` to `[0.1.0] — <date>`, point its compare link at
+  `...v0.1.0`, and commit that on `main`; the release notes link to
+  CHANGELOG by version heading.
 - `.github/workflows/release.yml` is dormant until a `v*.*.*` tag is
   pushed. It then validates, builds static Linux amd64/arm64 binaries
   (`-trimpath`, `CGO_ENABLED=0`, version from the tag via `-ldflags

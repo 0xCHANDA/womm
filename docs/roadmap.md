@@ -10,8 +10,8 @@ as future is implemented. PRs update this file; they don't improvise.
   `Observation`, `Match`, `MatchStatus`.
 - **Schema v1** (`internal/schema`) — `womm.yaml` load/validate/parse,
   version-policy errors, unknown-keys → warnings, evidence required.
-- **CLI foundation** (`internal/cli`) — root + `version`, exit-code
-  contract 0/1/2/3 (1 reserved; not produced yet).
+- **CLI foundation** (`internal/cli`) — root + `version`; exit-code
+  contract 0/1/2/3 (all produced since `verify`).
 - **L0 Node detection** (`internal/detectors/node`, PR #2) —
   `engines.node` / `.nvmrc` (conflict-safe conjunction, strict exact
   versions) and `packageManager` (npm/pnpm/yarn, Corepack
@@ -26,12 +26,12 @@ as future is implemented. PRs update this file; they don't improvise.
   (equality) and ranges (release versions only); explicit `unknown` +
   sentinel for name mismatches, contradictory observations
   (absent-with-version), malformed inputs and prerelease-vs-range
-  (consumers disagree; WOMM refuses to guess). Not wired to the CLI.
+  (consumers disagree; WOMM refuses to guess). Wired through `verify`.
 - **Reporting** (`internal/report`, PR #6) — deterministic rendering
   of `[]core.Match` (fixed order, fixed wording, evidence listed,
   summary counts); PASS/FAIL/UNKNOWN/UNREACHABLE labels; unknown
   statuses refused. Presentation only; exit-code **1** semantics
-  arrive with `verify`. Not wired to the CLI.
+  arrived with `verify`. Wired through `verify`.
 - **`womm capture`** (`internal/capture`, `internal/cli`, PR #7) —
   detect → deterministic `womm.yaml` (requirements sorted by name,
   evidence preserved verbatim, `requirements: []` when nothing is
@@ -46,6 +46,16 @@ as future is implemented. PRs update this file; they don't improvise.
   satisfies anything, so such declarations are now explicit errors in
   the detector and `unknown` in compare instead of a possible false
   PASS. Fuzzed.
+- **Campaign II hardening** (PRs #19–#22, #26) — `capture --force`
+  replaces atomically (temp file + rename: no hard-link write-through,
+  no FIFO hang); a cancelled run yields no verdict; child subreaper
+  kills `setsid`-escaped probe descendants; numeric components capped
+  at npm's `MAX_SAFE_INTEGER` with a 2 700-pair differential corpus
+  against node-semver; flaky race test fixed.
+- **Campaign II validation and release engineering** (PRs #23–#25,
+  #27–#29) — threat model, version-manager proposal, v0.2 proposal,
+  dormant tag-triggered release workflow, acceptance matrix,
+  exit-code fuzz target, docs truth audit.
 - **Hardening: `.nvmrc` per nvm** (PR #18, from independent review)
   — a comment-only `.nvmrc` or a `node=<v>` setting produced silent
   absence although nvm rejects both; now explicit errors, inline `#`

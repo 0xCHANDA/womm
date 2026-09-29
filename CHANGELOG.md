@@ -27,7 +27,14 @@ candidate content for the first tag, to be cut by a human.
   query it returns a partial observation (`Present: true`, no
   version); `verify` maps exactly that to `UNREACHABLE`. (#8)
 - End-to-end suite over realistic fixtures and the compiled binary;
-  fuzz targets for every parser and the renderer. (#9, #13)
+  acceptance matrix over realistic project and `womm.yaml` shapes;
+  fuzz targets for every parser, the renderer and the exit-code
+  aggregation. (#9, #13, #25, #28)
+- Tag-triggered release workflow (dormant until a human pushes a
+  `v*` tag): static Linux amd64/arm64 builds, version from the tag,
+  `SHA256SUMS`, GitHub Release. (#24)
+- Threat model (`docs/threat-model.md`) and design proposals for
+  version-managed Node and v0.2 scope. (#23, #29)
 
 ### Security / hardening
 
@@ -86,8 +93,10 @@ candidate content for the first tag, to be cut by a human.
   under `$HOME`) are not observed.
 - `.nvmrc` aliases (`lts/*`, `22`, `node`) are unsupported selectors,
   reported as errors, not resolved.
-- A probe descendant that leaves its process group (`setsid`) is not
-  reaped; WOMM still returns within timeout + 2s.
+- A probe descendant that leaves its process group (`setsid`) can
+  keep WOMM waiting up to timeout + 2s before it is adopted and
+  killed (Linux child subreaper); non-Linux builds have no subreaper
+  and such a process would survive under init (v0.1 is Linux-only).
 - `capture --force` overwrites; it never merges with or diffs against
   an existing `womm.yaml`.
 
