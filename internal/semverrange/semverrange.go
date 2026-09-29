@@ -16,17 +16,20 @@
 //	hyphen     := partial ws "-" ws partial
 //	comparator := ( ">=" | "<=" | ">" | "<" | "=" | "^" | "~" )? ws* partial
 //	partial    := "v"? xr ( "." xr ( "." xr qualifier? )? )?
-//	xr         := "x" | "X" | "*" | nr           (nr: 0 | [1-9][0-9]*)
+//	xr         := "x" | "X" | "*" | nr           (nr: 0 | [1-9][0-9]*, < 2^64)
 //	qualifier  := ( "-" pre )? ( "+" build )?   (only on full x.y.z with no wildcard)
 //
-// Empty sets ("", ">=22 ||") are rejected too: npm reads them as "*",
-// which would silently accept every version.
+// Rejected on top of the grammar (see checkPartial): numeric components
+// after a wildcard ("x.1.2"), an operator on a wildcard major (">x",
+// "^*"), and empty sets ("", ">=22 ||" — npm reads them as "*", which
+// would silently accept every version).
 package semverrange
 
 import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
@@ -53,9 +56,6 @@ var (
 	comparatorRe = regexp.MustCompile(`^(` + op + `)?(` + partial + `)$`)
 	hyphenRe     = regexp.MustCompile(`^(` + partial + `)\s+-\s+(` + partial + `)$`)
 	opOnlyRe     = regexp.MustCompile(`^` + op + `$`)
-	// wildcardQualifierRe catches "x.y.z-pre" shapes where a component is
-	// a wildcard: syntactically partial-like, semantically meaningless.
-	wildcardQualifierRe = regexp.MustCompile(`^v?(?:[^.]*[xX*][^.]*\.|[^.]*\.[^.]*[xX*][^.]*\.|[^.]*\.[^.]*\.[^.]*[xX*])`)
 )
 
 // Parse validates s against the npm grammar and returns the equivalent
@@ -113,7 +113,7 @@ func normalizeSet(set string) (string, error) {
 			return "", fmt.Errorf("%w: hyphen range %q", ErrSyntax, strings.TrimSpace(set))
 		}
 		for _, p := range []string{m[1], m[2]} {
-			if err := checkPartial(p); err != nil {
+			if err := checkPartial("-", p); err != nil {
 				return "", err
 			}
 		}
@@ -135,7 +135,7 @@ func normalizeSet(set string) (string, error) {
 		if m == nil {
 			return "", fmt.Errorf("%w: comparator %q", ErrSyntax, tok)
 		}
-		if err := checkPartial(m[2]); err != nil {
+		if err := checkPartial(m[1], m[2]); err != nil {
 			return "", err
 		}
 		out = append(out, tok)
@@ -143,12 +143,48 @@ func normalizeSet(set string) (string, error) {
 	return strings.Join(out, " "), nil
 }
 
-// checkPartial rejects a prerelease/build qualifier attached to a
-// version with a wildcard component ("1.x.3-beta"): npm's grammar
-// admits the shape but no version can be meant by it.
-func checkPartial(p string) error {
-	if strings.ContainsAny(p, "-+") && wildcardQualifierRe.MatchString(p) {
-		return fmt.Errorf("%w: qualifier on a wildcard version %q", ErrSyntax, p)
+// checkPartial applies the rules the regular expressions cannot: op is
+// the comparator's operator ("" for a bare version, "-" for a hyphen
+// range end), p the partial version.
+//
+//   - every numeric component must fit in 64 bits: npm rejects larger
+//     numbers at parse time, and Masterminds would fail later with an
+//     opaque error;
+//   - once a component is a wildcard the rest must be wildcards too
+//     ("x.1.2", "1.x.3"): npm cannot parse the first and both are a
+//     meaningless spelling that would otherwise evaluate to something;
+//   - an operator on a wildcard major (">x", "^*", "x - 2") is refused:
+//     npm turns ">x" into "<0.0.0-0" (never satisfied) while
+//     Masterminds accepts every version — a false PASS in the making.
+//     Spell "*" instead;
+//   - a prerelease/build qualifier is only meaningful on a full,
+//     wildcard-free x.y.z ("1.x-beta" is refused).
+func checkPartial(op, p string) error {
+	core, qualifier := p, ""
+	if i := strings.IndexAny(p, "-+"); i >= 0 {
+		core, qualifier = p[:i], p[i:]
+	}
+	core = strings.TrimPrefix(core, "v")
+	parts := strings.Split(core, ".")
+	wildcard := false
+	for _, part := range parts {
+		switch part {
+		case "x", "X", "*":
+			wildcard = true
+		default:
+			if wildcard {
+				return fmt.Errorf("%w: numeric component after a wildcard in %q", ErrSyntax, p)
+			}
+			if _, err := strconv.ParseUint(part, 10, 64); err != nil {
+				return fmt.Errorf("%w: version component %q in %q is not a number below 2^64", ErrSyntax, part, p)
+			}
+		}
+	}
+	if op != "" && (parts[0] == "x" || parts[0] == "X" || parts[0] == "*") {
+		return fmt.Errorf("%w: operator on a wildcard major version %q (spell \"*\" for any version)", ErrSyntax, op+p)
+	}
+	if qualifier != "" && (wildcard || len(parts) != 3) {
+		return fmt.Errorf("%w: qualifier on a wildcard or partial version %q", ErrSyntax, p)
 	}
 	return nil
 }
