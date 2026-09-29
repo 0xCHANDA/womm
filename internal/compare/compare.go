@@ -11,6 +11,7 @@ package compare
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/Masterminds/semver/v3"
 
@@ -128,7 +129,8 @@ func Compare(req core.Requirement, obs core.Observation) (core.Match, error) {
 
 	// An exact version is decided by equality, which every semver
 	// implementation agrees on — prerelease observations included.
-	if exact, err := semver.StrictNewVersion(req.Constraint); err == nil {
+	// "=24.7.0" and "v24.7.0" are the same exact comparator in npm.
+	if exact, err := semver.StrictNewVersion(strings.TrimPrefix(strings.TrimPrefix(req.Constraint, "="), "v")); err == nil {
 		if version.Equal(exact) {
 			match.Status = core.StatusPass
 			match.Reason = "observed version equals the required version"

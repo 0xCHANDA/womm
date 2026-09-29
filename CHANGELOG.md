@@ -41,8 +41,10 @@ candidate content for the first tag, to be cut by a human.
   timeout with process-group kill and a 2s wait backstop; output
   capped at 4 KiB. (#3, #12)
 - Version ranges are gated on npm's grammar before evaluation
-  (`>=22, <25`, `!=`, `=>`, `~>`, empty sets are explicit errors,
-  never a false PASS). (#10)
+  (`>=22, <25`, `!=`, `=>`, `~>`, empty sets, `x.1.2`, `>x`, numbers
+  beyond 2^64 are explicit errors, never a false PASS; prerelease
+  identifiers containing `x` such as `>=20.0.0-next.1` are accepted).
+  (#10, #16)
 - A prerelease observed against a range is `UNKNOWN` rather than a
   verdict, because npm's engines check, node-semver's default and the
   Go semver library disagree. (#4)
