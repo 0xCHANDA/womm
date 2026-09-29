@@ -160,10 +160,16 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
   input can add, break or forge a report line.
 
 **Capture output (`internal/capture`):**
-- The output path is `Lstat`ed and opened with `O_NOFOLLOW`
-  (`O_EXCL` without `--force`): a symlink planted as `womm.yaml` is
-  never followed, and nothing can be written outside the path the
-  user named.
+- Without `--force` the file is created with `O_CREAT|O_EXCL|O_NOFOLLOW`
+  (atomic: whatever appears at the path first wins; a symlink there
+  fails the create instead of being followed).
+- With `--force` the target is never opened: the document goes to an
+  `O_EXCL` temporary file in the same directory and is moved over the
+  path with `rename(2)`. A swap of the path to a symlink, FIFO or hard
+  link between the checks and the move can therefore neither redirect
+  the write, block WOMM, nor modify another name of the inode. Proven
+  by a swap-race stress test and a hard-link test; the previous
+  `O_TRUNC` open blocked on a FIFO swap and wrote through hard links.
 
 **L1 — machine probes (`internal/inspect/node`):**
 - Executables resolve only from a hardcoded allowlist
