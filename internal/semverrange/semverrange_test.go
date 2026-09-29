@@ -161,3 +161,21 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+func TestNormalize(t *testing.T) {
+	cases := map[string]string{
+		"  >=22\t<25 \n||\n ^20.10.0 ": ">=22 <25 || ^20.10.0",
+		">= 22":                        ">=22",
+		"22.0.0   -   24.0.0":          "22.0.0 - 24.0.0",
+		"24.x":                         "24.x",
+	}
+	for in, want := range cases {
+		got, err := Normalize(in)
+		if err != nil || got != want {
+			t.Errorf("Normalize(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	if _, err := Normalize(">=22,<25"); !errors.Is(err, ErrSyntax) {
+		t.Errorf("Normalize must apply the grammar: %v", err)
+	}
+}

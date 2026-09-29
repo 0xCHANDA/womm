@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
-
-	"github.com/0xCHANDA/womm/internal/semverrange"
 )
 
 // rangeVersion matches the only `.nvmrc` selector WOMM v0.0.1 supports
@@ -19,15 +17,6 @@ var exactVersion = regexp.MustCompile(`^v?\d+\.\d+\.\d+$`)
 // aliases and lts selectors). They must never be reinterpreted (e.g.
 // "22" must not become "22.0.0").
 var nvmKnownSelectors = regexp.MustCompile(`^(v?\d+(\.\d+){0,2}|lts/\*|lts/[a-z-]+|node|stable|default|latest)$`)
-
-// supportsConstraint reports whether the value is a range in npm's
-// grammar (package semverrange decides; Masterminds' looser syntax is
-// not accepted, so a declaration npm cannot parse never becomes a
-// requirement).
-func supportsConstraint(c string) bool {
-	_, err := semverrange.Parse(c)
-	return err == nil
-}
 
 // unsupportedSelector builds the explicit error for nvm selectors
 // outside our v0.0.1 subset. The wording must NOT claim the value is

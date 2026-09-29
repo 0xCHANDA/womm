@@ -2,7 +2,6 @@ package node
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -58,9 +57,9 @@ func (PackageManagerDetector) Detect(_ context.Context, projectRoot string) ([]c
 		// (inference absent by design).
 		return []core.Requirement{}, nil
 	}
-	var pkg packageJSON
-	if err := json.Unmarshal(pkgData, &pkg); err != nil {
-		return nil, fmt.Errorf("%s: malformed package.json (declared source, cannot be interpreted safely): %w", path, err)
+	pkg, err := parsePackageJSON(path, pkgData)
+	if err != nil {
+		return nil, err
 	}
 	pm := strings.TrimSpace(pkg.PackageManager)
 	if pm == "" {
