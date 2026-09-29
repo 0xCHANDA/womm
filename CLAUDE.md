@@ -136,7 +136,8 @@ CI (`.github/workflows/ci.yml`) re-runs these plus a
   executables resolve only from `/usr/local/bin`, `/usr/bin`, `/bin`
   — never the inherited `PATH`, never the project tree.
 - **Sanitized probe environment**: `NODE_OPTIONS` stripped; sanitized
-  `PATH`; neutral working directory (never the project root).
+  `PATH`; Corepack forced offline/passive; neutral working directory
+  (never the project root).
 - **Bounded execution**: 5s probe timeout with process-group kill and
   `WaitDelay`; output capped at 4KiB.
 - **Openness is an observation, not an error**: a missing binary is

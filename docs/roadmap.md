@@ -46,6 +46,10 @@ as future is implemented. PRs update this file; they don't improvise.
   satisfies anything, so such declarations are now explicit errors in
   the detector and `unknown` in compare instead of a possible false
   PASS. Fuzzed.
+- **Hardening: probe environment** (PR #12) — Corepack forced
+  offline/passive in every probe (no downloads, no package.json
+  auto-pin); bounded return proven against a `setsid`-escaped
+  descendant (timeout + WaitDelay).
 - **Hardening: hostile input** (PR #11) — regular-file-only, bounded
   reads for project sources (16 MiB) and womm.yaml (4 MiB): a FIFO
   or an oversized file is an explicit error, never a hang or a

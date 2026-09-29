@@ -58,6 +58,12 @@ const (
 	// probeTimeout bounds every version probe. A hanging binary must
 	// never hang WOMM.
 	probeTimeout = 5 * time.Second
+	// waitDelay bounds how long Wait may block on the output pipes
+	// after the process group was killed: a descendant that escaped
+	// the group (setsid) can keep the pipe open, and WOMM must still
+	// return. Such a process is not reaped — it cannot be without
+	// cgroups — but it can never hold WOMM.
+	waitDelay = 2 * time.Second
 	// maxOutputBytes bounds captured stdout+stderr. Version output is
 	// untrusted; a broken or malicious binary must not be able to
 	// exhaust memory through it. A real version string is at most a
@@ -173,7 +179,7 @@ func (n *NodeInspector) probe(ctx context.Context, path string) (string, error) 
 	// Belt and suspenders: even if the group kill above somehow fails
 	// to close every descendant's copy of the pipe, Wait must not
 	// block forever on it.
-	cmd.WaitDelay = 2 * time.Second
+	cmd.WaitDelay = waitDelay
 
 	out := &boundedWriter{limit: maxOutputBytes}
 	cmd.Stdout = out
@@ -216,7 +222,7 @@ func (n *NodeInspector) probe(ctx context.Context, path string) (string, error) 
 func sanitizedEnv() []string {
 	env := os.Environ()
 	stripped := strippedEnvKeys
-	filtered := make([]string, 0, len(env)+len(stripped))
+	filtered := make([]string, 0, len(env)+len(forcedEnv))
 	for _, kv := range env {
 		hostile := false
 		for _, key := range stripped {
@@ -230,14 +236,40 @@ func sanitizedEnv() []string {
 		}
 		filtered = append(filtered, kv)
 	}
-	return append(filtered, "PATH="+strings.Join(systemPathDirs, string(os.PathListSeparator)))
+	return append(filtered, forcedEnv...)
 }
 
 // strippedEnvKeys are the environment variables removed from every
-// probe's environment. PATH is replaced (not just dropped) below with
-// the sanitized system path; the rest are simply removed.
+// probe's environment. PATH is replaced (not just dropped) via
+// forcedEnv with the sanitized system path; the rest are simply
+// removed.
 var strippedEnvKeys = []string{
 	"NODE_OPTIONS", // node-only: can inject --require/-e code execution
+	"PATH",         // replaced by forcedEnv
+	// Corepack reads these to decide whether it may download a package
+	// manager; they are replaced by forcedEnv so the answer is always
+	// "no".
+	"COREPACK_ENABLE_NETWORK",
+	"COREPACK_ENABLE_AUTO_PIN",
+	"COREPACK_ENABLE_STRICT",
+}
+
+// forcedEnv are the variables every probe gets with fixed values,
+// after strippedEnvKeys removed any inherited copy.
+//
+// On many machines /usr/local/bin/pnpm and /usr/local/bin/yarn are
+// Corepack shims: "pnpm --version" may download pnpm from the network
+// before answering, and may rewrite the packageManager field of a
+// package.json it finds by walking up from the working directory.
+// A version probe must observe the machine, never change it or reach
+// out of it, so both behaviors are disabled: with the network off, an
+// uncached shim fails fast and the target is reported as unreachable
+// — truthfully, WOMM could not query it.
+var forcedEnv = []string{
+	"PATH=" + strings.Join(systemPathDirs, string(os.PathListSeparator)),
+	"COREPACK_ENABLE_NETWORK=0",
+	"COREPACK_ENABLE_AUTO_PIN=0",
+	"COREPACK_ENABLE_STRICT=0",
 }
 
 // boundedWriter caps how many bytes it will actually retain; bytes
