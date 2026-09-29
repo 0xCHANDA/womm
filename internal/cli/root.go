@@ -41,7 +41,7 @@ func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:     "womm",
 		Version: version,
-		Short: "Works On My Machine — development environment diagnostics",
+		Short:   "Works On My Machine — development environment diagnostics",
 		Long: "Works On My Machine (womm) is an evidence-based CLI that " +
 			"discovers a project's declared requirements and verifies " +
 			"whether this machine satisfies them.\n\n" +
