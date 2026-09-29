@@ -151,9 +151,18 @@ next slices (`docs/roadmap.md`):
 - `NODE_OPTIONS` is stripped from the probe environment (code-execution
   vector: `--require` runs arbitrary JS before `--version` prints);
   `PATH` inside the probe is replaced with the sanitized allowlist.
+- Corepack is forced offline and passive (`COREPACK_ENABLE_NETWORK=0`,
+  `COREPACK_ENABLE_AUTO_PIN=0`, `COREPACK_ENABLE_STRICT=0`): a shim at
+  `/usr/local/bin/pnpm` must neither download a package manager nor
+  rewrite a `package.json` during a version probe. An uncached shim
+  fails fast and is reported as unreachable.
 - Neutral working directory (`os.TempDir()`), never the project root.
 - Hard 5s timeout, process-group `SIGKILL` on cancel (`Setpgid` +
-  negative-PID kill), `WaitDelay` as backstop, output capped at 4KiB.
+  negative-PID kill), `WaitDelay` (2s) as backstop, output capped at
+  4KiB. A descendant that leaves the process group (`setsid`) cannot
+  be reaped without cgroups; `WaitDelay` guarantees WOMM still returns
+  within timeout + 2s, with the partial observation and the timeout
+  error. Documented limitation, tested.
 - Missing binary → `Observation{Present: false}`; unparseable output →
   `Observation{Version: ""}`. Both are observations, never fabricated.
 

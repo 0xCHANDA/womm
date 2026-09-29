@@ -536,3 +536,86 @@ func TestInspectNoPresenceWithoutResolution(t *testing.T) {
 		t.Fatalf("resolution failure: obs=%#v err=%v; want zero observation and an error", obs, err)
 	}
 }
+
+// --- Corepack: no network, no auto-pin ----------------------------------
+
+// TestSanitizedEnvForcesCorepackOffline pins that whatever the inherited
+// environment says, a probe runs with Corepack's network and auto-pin
+// switched off, and with exactly one PATH entry (the sanitized one).
+func TestSanitizedEnvForcesCorepackOffline(t *testing.T) {
+	t.Setenv("COREPACK_ENABLE_NETWORK", "1")
+	t.Setenv("COREPACK_ENABLE_AUTO_PIN", "1")
+	t.Setenv("COREPACK_ENABLE_STRICT", "1")
+	t.Setenv("PATH", "/evil/bin:/usr/bin")
+
+	env := sanitizedEnv()
+	count := map[string]int{}
+	value := map[string]string{}
+	for _, kv := range env {
+		k, v, _ := strings.Cut(kv, "=")
+		count[k]++
+		value[k] = v
+	}
+	for _, k := range []string{"PATH", "COREPACK_ENABLE_NETWORK", "COREPACK_ENABLE_AUTO_PIN", "COREPACK_ENABLE_STRICT"} {
+		if count[k] != 1 {
+			t.Errorf("%s appears %d times in the probe env, want exactly once: %v", k, count[k], env)
+		}
+	}
+	if value["COREPACK_ENABLE_NETWORK"] != "0" || value["COREPACK_ENABLE_AUTO_PIN"] != "0" || value["COREPACK_ENABLE_STRICT"] != "0" {
+		t.Errorf("Corepack switches not forced off: %v", env)
+	}
+	if value["PATH"] != strings.Join(systemPathDirs, string(os.PathListSeparator)) {
+		t.Errorf("PATH = %q, want the sanitized allowlist", value["PATH"])
+	}
+}
+
+// TestInspectProbeSeesCorepackOffline proves the forced values reach the
+// probed process itself, not just the slice.
+func TestInspectProbeSeesCorepackOffline(t *testing.T) {
+	t.Setenv("COREPACK_ENABLE_NETWORK", "1")
+	dir := t.TempDir()
+	path := writeFakeTool(t, dir, "pnpm",
+		`if [ "$COREPACK_ENABLE_NETWORK" = "0" ] && [ "$COREPACK_ENABLE_AUTO_PIN" = "0" ]; then echo 1.0.0; else echo 9.9.9; fi`+"\n")
+	insp := newTestInspector(staticResolver(map[string]string{"pnpm": path}), t.TempDir())
+	obs, err := insp.Inspect(context.Background(), core.Requirement{Name: "pnpm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs.Version != "1.0.0" {
+		t.Fatalf("probe saw Corepack network enabled (reported %q)", obs.Version)
+	}
+}
+
+// --- descendants that leave the process group ------------------------------
+
+// TestInspectReturnsEvenIfDescendantEscapesGroup pins the bounded-time
+// guarantee against a shim whose grandchild calls setsid: it leaves the
+// process group, survives the group kill and keeps the output pipe
+// open. WaitDelay must still bring Inspect back within timeout +
+// WaitDelay, with the timeout error and the partial observation. The
+// escaped process itself cannot be reaped without cgroups — a
+// documented limitation, not a hang.
+func TestInspectReturnsEvenIfDescendantEscapesGroup(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/setsid"); err != nil {
+		t.Skip("setsid not available")
+	}
+	dir := t.TempDir()
+	path := writeFakeTool(t, dir, "yarn", "/usr/bin/setsid sh -c 'sleep 30' &\nsleep 30\n")
+	insp := &NodeInspector{
+		resolvePath: staticResolver(map[string]string{"yarn": path}),
+		runDir:      t.TempDir(),
+		timeout:     100 * time.Millisecond,
+	}
+	start := time.Now()
+	obs, err := insp.Inspect(context.Background(), core.Requirement{Name: "yarn"})
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrProbeTimeout) {
+		t.Fatalf("error = %v, want ErrProbeTimeout", err)
+	}
+	if obs != (core.Observation{Name: "yarn", Present: true}) {
+		t.Fatalf("observation = %#v, want present without version", obs)
+	}
+	if elapsed > 100*time.Millisecond+waitDelay+2*time.Second {
+		t.Fatalf("Inspect took %s with an escaped descendant; must be bounded by timeout + WaitDelay", elapsed)
+	}
+}
