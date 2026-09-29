@@ -15,7 +15,7 @@ requirements.
 - [x] Core model / schema
 - [x] L0 requirement detection (Node, package manager — engines/.nvmrc/packageManager, conflict-safe)
 - [x] L1 machine inspection (`NodeInspector`: node/npm/pnpm/yarn, sanitized + bounded probes)
-- [~] Requirement comparison — implemented on `feat/compare-engine`; open PR #4, not merged
+- [x] Requirement comparison (pure `compare` engine: exact/range/present, prerelease-vs-range refused explicitly)
 - [ ] Reporting / exit codes
 - [ ] `capture`
 - [ ] `verify`
@@ -26,10 +26,7 @@ Merged:
 - PR #1 — Foundation hardening
 - PR #2 — Node + package manager L0 detection
 - PR #3 — `NodeInspector` (L1 machine inspection)
-
-Current:
-
-- PR #4 — Requirement comparison (pure `compare` engine; pending review)
+- PR #4 — Requirement comparison (pure `compare` engine)
 
 ## Build
 
