@@ -43,7 +43,8 @@ candidate content for the first tag, to be cut by a human.
   passive; `YARN_IGNORE_PATH=1`;
   `npm_config_manage_package_manager_versions=false`; 5s timeout with
   process-group kill and a 2s wait backstop; output capped at 4 KiB;
-  Ctrl-C kills a running probe. (#3, #12, #15)
+  Ctrl-C kills a running probe and yields no verdict (no partial
+  report, exit 3). (#3, #12, #15, #20)
 - Version ranges are gated on npm's grammar before evaluation
   (`>=22, <25`, `!=`, `=>`, `~>`, empty sets, `x.1.2`, `>x`, numbers
   beyond 2^64 are explicit errors, never a false PASS; prerelease
