@@ -46,6 +46,12 @@ as future is implemented. PRs update this file; they don't improvise.
   satisfies anything, so such declarations are now explicit errors in
   the detector and `unknown` in compare instead of a possible false
   PASS. Fuzzed.
+- **Hardening: hostile input** (PR #11) — regular-file-only, bounded
+  reads for project sources (16 MiB) and womm.yaml (4 MiB): a FIFO
+  or an oversized file is an explicit error, never a hang or a
+  truncated interpretation; UTF-8 BOM on package.json stripped like
+  npm; `engines.node` stored normalized; requirement names validated
+  (no whitespace/control chars); report escapes control characters.
 - **`womm verify`** (`internal/verify`, `internal/cli`, PR #8) —
   load `womm.yaml` → inspect → compare → report → exit code. Partial
   `Observation{Present: true}` from the inspector on probe failure,

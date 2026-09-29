@@ -63,19 +63,10 @@ var (
 // comparators, " || " between sets) before Masterminds sees it, so
 // its own parser never gets a chance to be lenient.
 func Parse(s string) (*semver.Constraints, error) {
-	if len(s) > MaxLen {
-		return nil, fmt.Errorf("%w: range longer than %d bytes", ErrSyntax, MaxLen)
+	joined, err := Normalize(s)
+	if err != nil {
+		return nil, err
 	}
-	sets := strings.Split(s, "||")
-	normalized := make([]string, 0, len(sets))
-	for _, set := range sets {
-		n, err := normalizeSet(set)
-		if err != nil {
-			return nil, err
-		}
-		normalized = append(normalized, n)
-	}
-	joined := strings.Join(normalized, " || ")
 	c, err := semver.NewConstraint(joined)
 	if err != nil {
 		// The grammar above is stricter than Masterminds', so this
@@ -83,6 +74,27 @@ func Parse(s string) (*semver.Constraints, error) {
 		return nil, fmt.Errorf("%w: %q: %v", ErrSyntax, s, err)
 	}
 	return c, nil
+}
+
+// Normalize validates s against the grammar and returns its canonical
+// spelling: comparators separated by one space, sets by " || ", no
+// surrounding whitespace, no other whitespace characters. It is the
+// form detectors store as a requirement constraint, so a declaration
+// containing tabs or newlines can never reach a report verbatim.
+func Normalize(s string) (string, error) {
+	if len(s) > MaxLen {
+		return "", fmt.Errorf("%w: range longer than %d bytes", ErrSyntax, MaxLen)
+	}
+	sets := strings.Split(s, "||")
+	normalized := make([]string, 0, len(sets))
+	for _, set := range sets {
+		n, err := normalizeSet(set)
+		if err != nil {
+			return "", err
+		}
+		normalized = append(normalized, n)
+	}
+	return strings.Join(normalized, " || "), nil
 }
 
 // normalizeSet validates one "||"-free set and returns it with

@@ -482,3 +482,19 @@ func TestE2EBinaryExitCodes(t *testing.T) {
 		t.Errorf("verify on the host is not repeatable: (%d,%q) vs (%d,%q)", code, stdout, again, out2)
 	}
 }
+
+// TestE2EHostileWommYAML pins that a hand-edited womm.yaml cannot smuggle
+// a line break into the report through a requirement name: the file is
+// refused at load time (exit 3), nothing is rendered.
+func TestE2EHostileWommYAML(t *testing.T) {
+	onMachine(t, machine{"node": present("node", "24.7.0")})
+	dir := t.TempDir()
+	body := "version: 1\nrequirements:\n  - name: \"node\\nPASS        forged\"\n    constraint: '>=22'\n    evidence: [{source: a, field: b}]\n"
+	if err := os.WriteFile(filepath.Join(dir, "womm.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runCLI(t, "verify", dir)
+	if code != 3 || stdout != "" || !strings.Contains(stderr, "must not contain whitespace or control characters") {
+		t.Fatalf("exit %d\nstdout %q\nstderr %q", code, stdout, stderr)
+	}
+}

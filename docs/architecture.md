@@ -135,6 +135,25 @@ next slices (`docs/roadmap.md`):
   resolves symlinks and refuses to read outside the project root.
 - A broken symlink in a declared source is an explicit error, not
   silent absence (declaration implies source).
+- Only regular files are read (a FIFO or device under a declared name
+  cannot block WOMM; a directory is not a declaration), and reads are
+  bounded (16 MiB; larger sources are explicit errors, never
+  truncated).
+- A UTF-8 BOM on package.json is stripped, exactly as npm does;
+  everything else must be strict JSON. `engines.node` is stored in
+  its normalized spelling (`semverrange.Normalize`), the verbatim
+  literal stays in `Evidence.Value`.
+
+**womm.yaml (`internal/schema`):**
+- `Load` reads regular files only, bounded to 4 MiB.
+- Requirement names must be plain identifiers: valid UTF-8, no
+  whitespace, no control characters (they are matched against tool
+  names and printed on their own report line).
+
+**Report (`internal/report`):**
+- Any name, constraint, observation or reason containing a control
+  character or invalid UTF-8 is rendered quoted (Go syntax), so no
+  input can add, break or forge a report line.
 
 **Capture output (`internal/capture`):**
 - The output path is `Lstat`ed and opened with `O_NOFOLLOW`

@@ -12,7 +12,10 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/0xCHANDA/womm/internal/core"
 )
@@ -84,7 +87,7 @@ func Render(w io.Writer, matches []core.Match) error {
 
 	nameWidth := 0
 	for _, m := range ordered {
-		if l := len(m.Requirement.Name); l > nameWidth {
+		if l := len(printable(m.Requirement.Name)); l > nameWidth {
 			nameWidth = l
 		}
 	}
@@ -94,10 +97,10 @@ func Render(w io.Writer, matches []core.Match) error {
 	for _, m := range ordered {
 		fmt.Fprintf(&b, "%-*s %-*s required %s; observed %s\n",
 			labelWidth, labels[m.Status],
-			nameWidth, m.Requirement.Name,
-			m.Requirement.Constraint, describeObservation(m.Observation))
+			nameWidth, printable(m.Requirement.Name),
+			printable(m.Requirement.Constraint), printable(describeObservation(m.Observation)))
 		if m.Reason != "" {
-			fmt.Fprintf(&b, "%s%s\n", indent, m.Reason)
+			fmt.Fprintf(&b, "%s%s\n", indent, printable(m.Reason))
 		}
 		for _, ev := range m.Requirement.Evidence {
 			fmt.Fprintf(&b, "%sevidence: %s → %s = %q\n", indent, ev.Source, ev.Field, ev.Value)
@@ -155,4 +158,21 @@ func summaryLine(s Summary) string {
 	}
 	return fmt.Sprintf("%d %s: %d pass, %d fail, %d unknown, %d unreachable",
 		s.Total(), noun, s.Pass, s.Fail, s.Unknown, s.Unreachable)
+}
+
+// printable returns s unchanged when it is plain printable text, and
+// its quoted Go-syntax form otherwise. Every value here ultimately
+// comes from a project file, a hand-edited womm.yaml or a probed
+// binary; a newline or escape sequence in it must never be able to
+// forge or break a report line.
+func printable(s string) string {
+	if !utf8.ValidString(s) {
+		return strconv.Quote(s)
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return strconv.Quote(s)
+		}
+	}
+	return s
 }
