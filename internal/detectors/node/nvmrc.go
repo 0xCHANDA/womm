@@ -8,21 +8,21 @@ import (
 	"github.com/Masterminds/semver/v3"
 )
 
-// rangeVersion matches the only `.nvmrc` selector WOMM v0.0.1 supports
+// rangeVersion matches the only `.nvmrc` selector WOMM v0.1 supports
 // as a verifiable requirement: a fully determined Node version.
 var exactVersion = regexp.MustCompile(`^v?\d+\.\d+\.\d+$`)
 
 // nvmKnownSelectors enumerates nvm-syntax values that are VALID for
-// nvm but deliberately unsupported by WOMM v0.0.1 (short versions,
+// nvm but deliberately unsupported by WOMM v0.1 (short versions,
 // aliases and lts selectors). They must never be reinterpreted (e.g.
 // "22" must not become "22.0.0").
 var nvmKnownSelectors = regexp.MustCompile(`^(v?\d+(\.\d+){0,2}|lts/\*|lts/[a-z-]+|node|stable|default|latest)$`)
 
 // unsupportedSelector builds the explicit error for nvm selectors
-// outside our v0.0.1 subset. The wording must NOT claim the value is
+// outside our v0.1 subset. The wording must NOT claim the value is
 // invalid: it is valid nvm syntax, just not supported yet.
 func unsupportedSelector(selector string) error {
-	return fmt.Errorf(".nvmrc selector %q is valid nvm syntax but is not supported by WOMM v0.0.1; use an explicit x.y.z version", selector)
+	return fmt.Errorf(".nvmrc selector %q is valid nvm syntax but is not supported by WOMM v0.1; use an explicit x.y.z version", selector)
 }
 
 // uninterpretableSelector is for content that is neither blank,

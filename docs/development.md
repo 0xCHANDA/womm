@@ -6,7 +6,7 @@
   `setup-go@v5` with `go-version: '1.24'` — no silent toolchain
   upgrades anywhere in the pipeline. Verify locally with
   `go env GOVERSION` (must be `go1.24.*`).
-- Linux is the only supported development target for v0.0.1 (the
+- Linux is the only supported development target for v0.1 (the
   inspector's path allowlist and probe hardening are Linux-specific).
 
 ## Commands
