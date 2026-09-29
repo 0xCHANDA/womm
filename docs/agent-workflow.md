@@ -90,6 +90,6 @@ git log origin/main..HEAD --format=%B | grep -iE 'co-authored-by|generated|anthr
 | Code | Meaning | Status |
 |---|---|---|
 | 0 | success | implemented |
-| 1 | semantic FAIL (environment incompatibility) | **reserved, not produced yet** — arrives with reporting/verify |
+| 1 | semantic FAIL (environment incompatibility), nothing inconclusive | implemented (`verify`) |
 | 2 | usage error (cobra flag/args) | implemented (`exitCodeFor`) |
-| 3 | execution/configuration error | implemented (`exitCodeFor`) |
+| 3 | execution/configuration error, or inconclusive verification (UNKNOWN/UNREACHABLE); takes precedence over 1 | implemented (`exitCodeFor`, `verify.ExitCode`) |

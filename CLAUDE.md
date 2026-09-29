@@ -23,8 +23,9 @@ works on my machine" becomes a report, not an anecdote.
 - **Not a guessing tool.** Ambiguous or malformed declarations are
   hard errors, never silently interpreted into a requirement.
 
-Current status: v0.0.1 vertical slice in progress (Linux + Node.js
-first). See `docs/roadmap.md` for what is real vs. pending.
+Current status: v0.1 vertical slice (Linux + Node.js) is functionally
+complete: `capture` and `verify` work end to end. See
+`docs/roadmap.md` for what is real vs. pending.
 
 ## Architecture
 
@@ -32,7 +33,7 @@ first). See `docs/roadmap.md` for what is real vs. pending.
 Detector (project, L0)  → core.Requirement (+ Evidence)
 Inspector (machine, L1) → core.Observation
 Compare                 → core.Match
-Reporting (internal/report) → CLI (not wired yet)
+Reporting (internal/report) → CLI (verify: internal/verify → exit code)
 ```
 
 Frontier rule: **Detected ≠ Required, Observed ≠ Verified** — the
@@ -44,14 +45,15 @@ Where things live (on `main`; see `docs/architecture.md` for detail):
 | Piece | Location | Notes |
 |---|---|---|
 | Entry point | `cmd/womm/main.go` | calls `internal/cli.Execute` |
-| CLI | `internal/cli` | cobra; `version`, `capture`; exit-code contract 0/1/2/3 (1 reserved) |
+| CLI | `internal/cli` | cobra; `version`, `capture`, `verify`; exit-code contract 0/1/2/3 |
 | Domain model | `internal/core` | `Requirement`, `Observation`, `Evidence`, `Match`, `MatchStatus` |
 | Schema v1 | `internal/schema` | `womm.yaml` load/validate/parse/marshal |
 | Detection (L0) | `internal/detectors` + `internal/detectors/node` | `NodeDetector`, `PackageManagerDetector` |
 | Inspection (L1) | `internal/inspect` + `internal/inspect/node` | `NodeInspector` (node/npm/pnpm/yarn) |
 | Capture | `internal/capture` | detectors → sorted `schema.File`; symlink-safe `Write` |
 | Comparison | `internal/compare` | pure `Compare`; exact/range/present; prerelease-vs-range refused |
-| Reporting | `internal/report` | `Render`/`Summarize`; presentation only, not wired to the CLI |
+| Reporting | `internal/report` | `Render`/`Summarize`; presentation only |
+| Verify | `internal/verify` | inspect → compare; unreachable mapping; `ExitCode` (3 beats 1) |
 
 ## Engineering principles
 
@@ -69,8 +71,8 @@ These are enforced by the code today — keep enforcing them:
 - **No hidden machine mutation.** Inspectors execute only resolved
   system binaries with fixed `--version` args — no shell, no project
   code, no `npx`/corepack.
-- **Predictable exit codes.** 0 success, 1 semantic FAIL (reserved,
-  not produced yet), 2 usage, 3 execution/config.
+- **Predictable exit codes.** 0 success, 1 semantic FAIL, 2 usage,
+  3 inconclusive/execution/config (3 takes precedence over 1).
 - **Deterministic, composable packages.** `compare` is pure (no I/O);
   detection/inspection return values, never print.
 - **Failure is surfaced, not masked.** Broken symlinks and missing

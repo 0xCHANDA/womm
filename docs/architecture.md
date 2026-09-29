@@ -8,7 +8,8 @@ Detector (project, L0)  → core.Requirement + Evidence
 Inspector (machine, L1) → core.Observation
 Compare                 → core.Match
 Reporting               → presentation (internal/report)
-CLI orchestration       → user-facing command surface
+Verify orchestration    → internal/verify (unreachable mapping, exit code)
+CLI                     → user-facing command surface
 ```
 
 Frontier rule: **Detected ≠ Required, Observed ≠ Verified.** Detectors
@@ -20,15 +21,16 @@ comparison is pure logic; reporting is presentation only.
 | Package | Layer | Status | Responsibility |
 |---|---|---|---|
 | `cmd/womm` | CLI | merged (PR 1) | `main` → `internal/cli.Execute` |
-| `internal/cli` | CLI | merged (PR 1, PR 7) | cobra root + `version` + `capture`; exit-code contract 0/1/2/3 (1 reserved, not produced yet); a fresh command tree per run |
+| `internal/cli` | CLI | merged (PR 1, 7, 8) | cobra root + `version` + `capture` + `verify`; exit-code contract 0/1/2/3 fully produced; a fresh command tree per run |
 | `internal/core` | domain | merged (PR 1) | ecosystem-agnostic model: `Requirement`, `Evidence`, `Observation`, `Match`, `MatchStatus` |
 | `internal/schema` | persistence | merged (PR 1, PR 7) | `womm.yaml` schema v1: load, parse, validate, `Marshal` (deterministic, validated, round-trip safe); version-policy errors (`ErrVersion`), unknown-keys → warnings |
 | `internal/detectors` | L0 | merged (PR 2) | `Detector` boundary: project filesystem reads only → `core.Requirement` |
 | `internal/detectors/node` | L0 | merged (PR 2) | `NodeDetector` (package.json `engines.node` + `.nvmrc`, conflict-safe) and `PackageManagerDetector` (`packageManager`, Corepack hash subset) |
-| `internal/inspect` | L1 | merged (PR 3) | `Inspector` boundary: demand-driven machine observation → `core.Observation` |
+| `internal/inspect` | L1 | merged (PR 3, 8) | `Inspector` boundary: demand-driven machine observation → `core.Observation`; partial `Observation{Present: true}` next to a probe error |
 | `internal/inspect/node` | L1 | merged (PR 3) | `NodeInspector`: node/npm/pnpm/yarn `--version` probes with full L1 containment |
 | `internal/compare` | logic | merged (PR 4) | pure `Compare(req, obs) → core.Match`; exact versions by equality, ranges for release versions only, prerelease-vs-range refused |
 | `internal/capture` | orchestration (L0) | merged (PR 7) | `Capture(root)`: run the fixed detector set → sorted `schema.File`; `Write(path, file, force)`: never follows symlinks, never overwrites without `--force` |
+| `internal/verify` | orchestration | merged (PR 8) | `Verify(file, inspectors) → Result{Matches, Errors}`: inspect → compare, maps known-present probe failures to `unreachable`; `ExitCode(Result)` |
 | `internal/report` | presentation | merged (PR 6) | `Render([]core.Match)`: deterministic order + wording, `Summarize` counts; no inspection, no comparison, no exit codes |
 
 ## Data flow (current and planned)
@@ -68,8 +70,33 @@ comparison is pure logic; reporting is presentation only.
    Existing files need `--force`; a symlink at the output path is
    refused in both modes (a project could point `womm.yaml` at any
    file). Detection errors abort with exit 3 and nothing is written.
-6. **CLI (future).** `verify` and exit-code mapping. Exit 1 will mean
-   semantic FAIL; nothing produces it today.
+6. **Verify (`womm verify [dir]`).** `schema.Load` → `verify.Verify`
+   → `report.Render` → `verify.ExitCode`. For each requirement (in
+   name order) the first supporting inspector observes the machine;
+   the observation goes through `compare.Compare` and the match is
+   kept whatever its status (a compare sentinel is echoed to stderr
+   as a diagnostic). Requirements no inspector supports, and
+   inspection failures where presence was never established, are
+   operational errors: reported on stderr, never turned into a match.
+
+   **Unreachable contract.** `core.StatusUnreachable` means "the
+   target is known to be present, but WOMM could not query it". The
+   knowledge comes from the inspector: when the binary resolved and
+   started but the probe failed (timeout, non-zero exit, exec error),
+   `Inspect` returns `Observation{Name, Present: true}` together with
+   the error. `verify` maps exactly that pair — present, same name,
+   no version, error — to an `unreachable` match whose reason carries
+   the probe failure. Compare never sees it and gains no error
+   mapping; inspectors decide nothing.
+
+   **Exit-code contract** (`verify.ExitCode`, pure):
+
+   | Code | When |
+   |---|---|
+   | 0 | every match is PASS and no operational error |
+   | 1 | at least one FAIL and nothing inconclusive |
+   | 2 | usage error (CLI only) |
+   | 3 | any UNKNOWN or UNREACHABLE match, any operational error, malformed or unloadable `womm.yaml` — 3 wins over 1 |
 
 ## Boundaries and dependencies (enforced)
 
@@ -89,12 +116,14 @@ comparison is pure logic; reporting is presentation only.
 Documented on purpose — do not "resolve" these silently; they are the
 next slices (`docs/roadmap.md`):
 
-1. `internal/compare` is merged but not wired to the CLI.
-2. `internal/report` is merged but not wired to the CLI.
-3. The CLI produces 0/2/3 only; exit 1 (semantic FAIL) is part of the
-   public contract but not produced until verify exists.
-4. `verify` does not exist; `capture` does not detect conflicts with
-   an existing womm.yaml (`--force` overwrites, it never merges).
+1. `capture` does not detect conflicts with an existing womm.yaml
+   (`--force` overwrites, it never merges).
+2. `verify` observes only binaries in the fixed system path allowlist
+   (`/usr/local/bin`, `/usr/bin`, `/bin`). A Node installed through a
+   version manager under `$HOME` is reported as absent or shadowed by
+   the system one — by design for v0.1 (never the inherited PATH),
+   and visible in the report as what was actually observed.
+3. Only the Node.js ecosystem has a detector and an inspector.
 
 ## Security invariants (invariant — do not weaken)
 
