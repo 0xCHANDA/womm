@@ -2,5 +2,20 @@
 /womm
 /womm-*
 
-# editor/DE artifacts
+# editor/OS artifacts
 .directory
+.DS_Store
+.idea/
+*.swp
+
+# coverage / test artifacts
+*.out
+coverage.*
+
+# local agent state (committed counterpart: .claude/settings.json)
+.claude/*
+!.claude/settings.json
+
+# CI tidy-check leftovers
+go.mod.bak
+go.sum.bak

@@ -51,5 +51,10 @@ jobs:
       - name: go test
         run: go test ./...
 
+      # -race is part of the validation contract (exec/goroutines are
+      # load-bearing in the inspector); it must not drift from CI.
+      - name: go test (race)
+        run: go test -race ./...
+
       - name: go build
         run: go build ./cmd/womm
