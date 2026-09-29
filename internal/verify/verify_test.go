@@ -279,3 +279,37 @@ func TestExitCodeContract(t *testing.T) {
 		t.Errorf("ExitUsage = %d, the public contract says 2", ExitUsage)
 	}
 }
+
+// TestVerifyDeclaredSectionsWithoutVerifierAreErrors pins that a file
+// declaring services or environment variables can never verify clean:
+// nothing checks them in v0.1, so the run is inconclusive (3), not 0.
+func TestVerifyDeclaredSectionsWithoutVerifierAreErrors(t *testing.T) {
+	insp := &fakeInspector{answers: map[string]outcome{
+		"node": {obs: core.Observation{Name: "node", Present: true, Version: "24.7.0"}},
+	}}
+	f := file(req("node", ">=22"))
+	f.Services = map[string]schema.Service{"redis": {Version: ">=7"}, "postgres": {Version: ">=16", Port: 5432}}
+	f.Environment = schema.Environment{Required: []string{"DATABASE_URL"}, Optional: []string{"DEBUG"}}
+
+	res := Verify(context.Background(), f, []inspect.Inspector{insp})
+	if len(res.Matches) != 1 || res.Matches[0].Status != core.StatusPass {
+		t.Fatalf("matches = %+v", res.Matches)
+	}
+	if len(res.Errors) != 3 {
+		t.Fatalf("errors = %v, want postgres, redis (sorted) and environment", res.Errors)
+	}
+	for i, want := range []string{`service "postgres"`, `service "redis"`, "environment section declares 2 variable(s)"} {
+		if !errors.Is(res.Errors[i], ErrUnsupportedRequirement) || !strings.Contains(res.Errors[i].Error(), want) {
+			t.Errorf("errors[%d] = %v, want ErrUnsupportedRequirement mentioning %q", i, res.Errors[i], want)
+		}
+	}
+	if ExitCode(res) != ExitInconclusive {
+		t.Errorf("ExitCode = %d, want 3", ExitCode(res))
+	}
+
+	// Sections only, no requirements: still inconclusive, never 0.
+	only := &schema.File{Version: schema.Version, Services: map[string]schema.Service{"postgres": {Version: "16"}}}
+	if res := Verify(context.Background(), only, nil); ExitCode(res) != ExitInconclusive || len(res.Matches) != 0 {
+		t.Errorf("services-only file: exit %d, matches %+v; want 3 and none", ExitCode(res), res.Matches)
+	}
+}

@@ -58,7 +58,11 @@ candidate content for the first tag, to be cut by a human.
   control characters in every field so no input can forge a line.
   (#11, #13)
 - `womm.yaml` output: existing files need `--force`; a symlink at the
-  output path is refused and never followed. (#7)
+  output path is refused and never followed; `verify` refuses to read
+  a `womm.yaml` that is a symlink, too. (#7, #17)
+- A `womm.yaml` that declares `services` or `environment` (sections
+  v0.1 cannot verify) is inconclusive (exit 3, explicit error), never
+  a clean PASS. (#17)
 
 ### Known limitations
 

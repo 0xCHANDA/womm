@@ -21,9 +21,17 @@ var ErrMalformed = errors.New("womm.yaml is not valid YAML")
 // and an error for malformed YAML, version incompatibility or schema
 // violations. Warnings never make Load fail.
 func Load(path string) (*File, []string, error) {
-	info, err := os.Stat(path)
+	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("cannot read %s: %w", path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		// The file sits inside a project WOMM did not write. A
+		// project can plant `womm.yaml -> ../anything` and steer the
+		// read outside itself (unknown-key warnings would echo the
+		// target's keys). The link is refused; the same rule capture
+		// applies when writing.
+		return nil, nil, fmt.Errorf("%w: %s", ErrSymlink, path)
 	}
 	if !info.Mode().IsRegular() {
 		// A FIFO or device would block the read forever; a directory
@@ -48,6 +56,10 @@ func Load(path string) (*File, []string, error) {
 // MaxFileBytes bounds the size of a womm.yaml Load will read. The file
 // describes a handful of requirements; anything larger is not one.
 const MaxFileBytes = 4 << 20
+
+// ErrSymlink marks a womm.yaml path that is a symbolic link; Load
+// never follows one.
+var ErrSymlink = errors.New("womm.yaml is a symbolic link; refusing to follow it")
 
 // ErrTooLarge marks a womm.yaml above MaxFileBytes.
 var ErrTooLarge = errors.New("womm.yaml exceeds the size limit")

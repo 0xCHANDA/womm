@@ -145,9 +145,10 @@ Exit codes:
 | 2 | usage error |
 | 3 | inconclusive: any `UNKNOWN` or `UNREACHABLE`, a `womm.yaml` that does not load, or an operational failure — 3 takes precedence over 1 |
 
-Operational failures (a requirement no inspector supports, a probe
+Operational failures (a requirement no inspector supports, a
+`services` or `environment` section — not verified in v0.1 — a probe
 that failed before the tool was even found) are printed on stderr as
-`error: …` and never become a status.
+`error: …`, never become a status, and make the run inconclusive.
 
 ### Constraint semantics
 

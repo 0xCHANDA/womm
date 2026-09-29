@@ -498,3 +498,27 @@ func TestE2EHostileWommYAML(t *testing.T) {
 		t.Fatalf("exit %d\nstdout %q\nstderr %q", code, stdout, stderr)
 	}
 }
+
+// TestE2EServicesOnlyFileIsInconclusive: a womm.yaml that declares only
+// sections WOMM v0.1 cannot verify exits 3 with an explicit error, not
+// a clean 0 with "0 requirements".
+func TestE2EServicesOnlyFileIsInconclusive(t *testing.T) {
+	onMachine(t, machine{})
+	dir := t.TempDir()
+	body := "version: 1\nservices:\n  postgres:\n    version: '16'\n    port: 5432\nenvironment:\n  required: [DATABASE_URL]\n"
+	if err := os.WriteFile(filepath.Join(dir, "womm.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runCLI(t, "verify", dir)
+	if code != 3 {
+		t.Errorf("exit %d, want 3", code)
+	}
+	if stdout != "0 requirements: 0 pass, 0 fail, 0 unknown, 0 unreachable\n" {
+		t.Errorf("stdout %q", stdout)
+	}
+	for _, want := range []string{`error: no inspector supports requirement: service "postgres" (services are not verified by WOMM v0.1)`, "environment section declares 1 variable(s)"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, stderr)
+		}
+	}
+}
