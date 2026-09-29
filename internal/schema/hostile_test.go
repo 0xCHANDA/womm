@@ -2,6 +2,7 @@ package schema
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,7 +59,7 @@ func TestLoadRefusesOversizedFile(t *testing.T) {
 }
 
 func TestNamesMustBePlainIdentifiers(t *testing.T) {
-	bad := []string{"no de", "no\nde", "no\tde", "node\x00", "\x1b[31mnode", " node", "no de"}
+	bad := []string{"no de", "no\nde", "no\tde", "node\x00", "\x1b[31mnode", " node", "no de", "node\u202e", "no\u200bde", "\ufeffnode", "no\u00adde"}
 	for _, name := range bad {
 		t.Run(name, func(t *testing.T) {
 			y := "version: 1\nrequirements:\n  - name: " + yamlQuote(name) + "\n    constraint: '>=22'\n    evidence: [{source: a, field: b}]\n"
@@ -93,17 +94,17 @@ func TestNamesMustBePlainIdentifiers(t *testing.T) {
 func yamlQuote(s string) string {
 	var b strings.Builder
 	b.WriteByte('"')
-	for _, r := range []byte(s) {
+	for _, r := range s {
 		switch {
 		case r == '"' || r == '\\':
 			b.WriteByte('\\')
-			b.WriteByte(r)
-		case r < 0x20 || r >= 0x7f:
-			b.WriteString(`\x`)
-			b.WriteByte("0123456789abcdef"[r>>4])
-			b.WriteByte("0123456789abcdef"[r&0xf])
+			b.WriteRune(r)
+		case r < 0x20 || r == 0x7f:
+			fmt.Fprintf(&b, `\x%02x`, r)
+		case r >= 0x80:
+			fmt.Fprintf(&b, `\u%04x`, r)
 		default:
-			b.WriteByte(r)
+			b.WriteRune(r)
 		}
 	}
 	b.WriteByte('"')

@@ -96,11 +96,13 @@ func (PackageManagerDetector) Detect(_ context.Context, projectRoot string) ([]c
 //     use the sha1 form.
 //   - sha224 is the documented example in the Corepack README
 //     (`yarn@3.2.3+sha224.953c8233…`).
-//   - sha256 and sha384 have NO direct evidence as packageManager
-//     checksum forms in Corepack sources or docs (the SHA256 in
-//     verifySignature is npm registry signature verification, not a
-//     descriptor hash), so they are NOT claimed as supported in
-//     v0.1. WOMM represents what we know, not what probably works.
+//   - sha256 and sha384: Corepack's descriptor check
+//     (dist/lib/corepack.cjs, `const algo = build[0] ?? "sha512"`)
+//     feeds the algorithm name straight to Node's crypto.createHash
+//     and compares the hex digest, so any digest algorithm Node knows
+//     works; sha256 in particular is what `corepack use` emits on
+//     some setups (independent review). Accepted with their exact
+//     hex lengths. Other names remain explicit errors.
 //
 // `+garbage` suffixes, unknown algorithms and wrong-length digests are
 // all explicit errors, never silently stripped: they are not syntax we
@@ -109,6 +111,8 @@ func (PackageManagerDetector) Detect(_ context.Context, projectRoot string) ([]c
 var corepackHashAlgorithms = map[string]int{
 	"sha1":   40,
 	"sha224": 56,
+	"sha256": 64,
+	"sha384": 96,
 	"sha512": 128,
 }
 
@@ -121,11 +125,11 @@ var corepackHexDigest = regexp.MustCompile(`^[0-9a-f]+$`)
 func validateCorepackHash(hash string) error {
 	algo, digest, ok := strings.Cut(hash, ".")
 	if !ok || algo == "" || digest == "" {
-		return fmt.Errorf("integrity hash %q is not a supported Corepack checksum form (expected +<algo>.<hex>; supported algorithms: sha1, sha224, sha512)", hash)
+		return fmt.Errorf("integrity hash %q is not a supported Corepack checksum form (expected +<algo>.<hex>; supported algorithms: sha1, sha224, sha256, sha384, sha512)", hash)
 	}
 	wantLen, supported := corepackHashAlgorithms[algo]
 	if !supported {
-		return fmt.Errorf("integrity hash algorithm %q is not supported by WOMM v0.1 (supported: sha1, sha224, sha512)", algo)
+		return fmt.Errorf("integrity hash algorithm %q is not supported by WOMM v0.1 (supported: sha1, sha224, sha256, sha384, sha512)", algo)
 	}
 	if !corepackHexDigest.MatchString(digest) {
 		return fmt.Errorf("integrity hash digest %q must be lowercase hexadecimal", digest)

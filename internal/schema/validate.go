@@ -75,7 +75,11 @@ func validName(name string) bool {
 		return false
 	}
 	for _, r := range name {
-		if unicode.IsSpace(r) || unicode.IsControl(r) {
+		// Whitespace, controls, and format characters (Cf: zero-width
+		// joiners, bidi overrides, soft hyphen, BOM) — the last can
+		// reorder or hide part of a report line while looking like a
+		// plain name.
+		if unicode.IsSpace(r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r) {
 			return false
 		}
 	}
