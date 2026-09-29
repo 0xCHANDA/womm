@@ -734,3 +734,28 @@ func TestInspectProbeSeesAccountHome(t *testing.T) {
 		t.Fatalf("probe saw the inherited HOME/COREPACK_HOME (reported %q)", obs.Version)
 	}
 }
+
+// TestInspectSweepsEscapeeAfterSuccessfulProbe: a shim that answers
+// correctly but leaves a setsid-detached process behind must not leak
+// it — the sweep runs on the success path too.
+func TestInspectSweepsEscapeeAfterSuccessfulProbe(t *testing.T) {
+	if _, err := os.Stat("/usr/bin/setsid"); err != nil {
+		t.Skip("setsid not available")
+	}
+	dir := t.TempDir()
+	log := filepath.Join(t.TempDir(), "alive")
+	path := writeFakeTool(t, dir, "npm",
+		"/usr/bin/setsid sh -c 'for i in $(seq 1 1500); do echo tick >> "+log+"; sleep 0.02; done' </dev/null >/dev/null 2>&1 &\necho 11.2.0\n")
+	insp := newTestInspector(staticResolver(map[string]string{"npm": path}), probeDir)
+	obs, err := insp.Inspect(context.Background(), core.Requirement{Name: "npm"})
+	if err != nil || obs.Version != "11.2.0" {
+		t.Fatalf("obs=%+v err=%v", obs, err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	before, _ := os.ReadFile(log)
+	time.Sleep(300 * time.Millisecond)
+	after, _ := os.ReadFile(log)
+	if len(after) > len(before) {
+		t.Fatalf("detached descendant survived a successful probe (log grew %d -> %d bytes)", len(before), len(after))
+	}
+}
