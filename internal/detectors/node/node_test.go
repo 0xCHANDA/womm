@@ -268,18 +268,15 @@ func TestNodeDetectorMissingAndEmptySources(t *testing.T) {
 			t.Errorf("expected 0 requirements, got %+v", reqs)
 		}
 	})
-	t.Run("empty and whitespace-only nvmrc", func(t *testing.T) {
-		for _, content := range []string{"", "\n\n", "   \n"} {
+	t.Run("empty and whitespace-only nvmrc is a declared source with nothing in it", func(t *testing.T) {
+		for _, content := range []string{"", "\n\n", "   \n", "# only\n\n  # comments\n"} {
 			dir := t.TempDir()
 			if err := writeFile(dir, ".nvmrc", content); err != nil {
 				t.Fatal(err)
 			}
 			reqs, err := NewNodeDetector().Detect(context.Background(), dir)
-			if err != nil {
-				t.Fatalf("empty/whitespace nvmrc must not error: %v", err)
-			}
-			if len(reqs) != 0 {
-				t.Errorf("expected no requirements for %q, got %+v", content, reqs)
+			if err == nil || !strings.Contains(err.Error(), "declares no version") {
+				t.Fatalf("content %q: err=%v reqs=%+v; nvm rejects such a file, so must WOMM (never silent absence)", content, err, reqs)
 			}
 		}
 	})
@@ -293,7 +290,13 @@ func TestNvmrcParsing(t *testing.T) {
 		wantSub string // required error substring
 	}{
 		{"comment then version", "# Node para desarrollo\n22.14.0\n", "22.14.0", ""},
+		{"inline comment", "22.14.0 # pinned for CI\n", "22.14.0", ""},
 		{"key=value ignored", "FOO=bar\n22.14.0\n", "22.14.0", ""},
+		{"key=value after version", "22.14.0\nFOO=bar\n", "22.14.0", ""},
+		{"node= setting is invalid for nvm", "node=22.14.0\n", "", "invalid for nvm"},
+		{"node= alongside a version", "node=22.14.0\n22.14.0\n", "", "invalid for nvm"},
+		{"duplicate setting", "FOO=1\nFOO=2\n22.14.0\n", "", "appears more than once"},
+		{"settings only", "FOO=bar\n", "", "declares no version"},
 		{"v prefix", "v20.5.3\n", "20.5.3", ""},
 		{"formally invalid exact (leading zero)", "01.2.3\n", "", "not a valid exact Node version"},
 		{"multiple selectors", "20.0.0\n22.0.0\n", "", "multiple version selectors"},
@@ -303,7 +306,7 @@ func TestNvmrcParsing(t *testing.T) {
 		{"lts alias unsupported", "lts/iron\n", "", "valid nvm syntax but is not supported"},
 		{"node alias unsupported", "node\n", "", "valid nvm syntax but is not supported"},
 		{"uninterpretable", "garbage-here\n", "", "cannot interpret"},
-		{"comment-only file", "#yosolo comentario\n", "", ""},
+		{"comment-only file", "#yosolo comentario\n", "", "declares no version"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

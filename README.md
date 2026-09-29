@@ -55,7 +55,7 @@ Reads only explicit declarations inside the project root:
 | Source | Field | Becomes |
 |---|---|---|
 | `package.json` | `engines.node` | `node` range (npm range grammar) |
-| `.nvmrc` | exact `x.y.z` / `vx.y.z` | `node` exact version |
+| `.nvmrc` | exact `x.y.z` / `vx.y.z` (nvm comment and `KEY=value` rules) | `node` exact version |
 | `package.json` | `packageManager` | `npm` / `pnpm` / `yarn` exact version (Corepack `+sha1/sha224/sha512.<hex>` validated and stripped) |
 
 `engines.node` and `.nvmrc` together must agree: the exact `.nvmrc`
@@ -65,7 +65,8 @@ capture aborts with an evidence conflict — no side is picked.
 
 Explicit errors (exit 3, nothing written): malformed `package.json`,
 conflicting declarations, `.nvmrc` selectors that are valid for nvm
-but not verifiable (`lts/*`, `22`, `node`, `stable`), range syntax npm
+but not verifiable (`lts/*`, `22`, `node`, `stable`), an `.nvmrc`
+nvm itself rejects (no version line, `node=` setting), range syntax npm
 does not accept (`>=22, <25`, `!=`), package managers other than
 npm/pnpm/yarn, Corepack URLs, a declared source that is a symlink
 escaping the project, a broken symlink, a FIFO, or a file over 16 MiB.

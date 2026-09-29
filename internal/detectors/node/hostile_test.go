@@ -172,7 +172,10 @@ func FuzzNvmrcFile(f *testing.F) {
 		if err != nil && c != nil {
 			t.Fatalf("candidate returned with an error")
 		}
-		if err == nil && c != nil {
+		if err == nil && c == nil {
+			t.Fatalf("a .nvmrc that yields nothing must be an error, got silent absence for %q", data)
+		}
+		if err == nil {
 			if c.source != ".nvmrc" || c.field != "version" || c.constraint == "" {
 				t.Fatalf("malformed candidate: %+v", c)
 			}

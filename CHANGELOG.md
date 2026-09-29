@@ -64,6 +64,11 @@ candidate content for the first tag, to be cut by a human.
   v0.1 cannot verify) is inconclusive (exit 3, explicit error), never
   a clean PASS. (#17)
 
+- `.nvmrc` follows nvm's own reader: `#` comments anywhere, a file
+  with no version line is an error (nvm rejects it too), a `node=`
+  setting and duplicated settings are errors, other `KEY=value`
+  settings are ignored. (#18)
+
 ### Known limitations
 
 - Linux only. Only the Node.js ecosystem (`node`, `npm`, `pnpm`,

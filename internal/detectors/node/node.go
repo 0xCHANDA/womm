@@ -144,16 +144,13 @@ func unsupportedConstraint(source, constraint string) error {
 }
 
 // nvmrcCandidate converts .nvmrc content into its single supported
-// candidate. Selector semantics live in nvmrc.go; see that file for
-// the handled set (comments, KEY=value, exact versions, unsupported
-// but valid nvm syntax, multiple selectors).
+// candidate, or an explicit error: an existing .nvmrc always declares
+// something or is invalid (nvm's rule, and ours). Line semantics live
+// in nvmrcSignificant, selector semantics in nvmrc.go.
 func nvmrcCandidate(data []byte) (*candNode, error) {
 	line, err := nvmrcSignificant(data)
 	if err != nil {
 		return nil, err
-	}
-	if line == "" {
-		return nil, nil
 	}
 	version, err := nvmrcSelector(line)
 	if err != nil {
@@ -162,43 +159,67 @@ func nvmrcCandidate(data []byte) (*candNode, error) {
 	return &candNode{constraint: version, source: ".nvmrc", field: "version", value: line}, nil
 }
 
-// nvmrcSignificant returns the single significant line (non-blank,
-// non-comment, non-KEY=value). Multiple real selectors are a file
-// error, not a silent first-pick.
+// nvmrcSignificant returns the single version selector line of a
+// .nvmrc, following nvm's own reader (nvm_process_nvmrc_content):
+//
+//   - "#" starts a comment anywhere in a line; blank lines are ignored;
+//   - a file with no remaining line is INVALID for nvm — and a declared
+//     source that declares nothing is an explicit error here too, never
+//     silent absence;
+//   - KEY=value lines are nvm settings: the key "node" is rejected by
+//     nvm (a version is not a setting), a duplicated key is rejected,
+//     other keys are ignored;
+//   - exactly one bare selector line must remain. Several are a file
+//     error, not a silent first-pick.
 func nvmrcSignificant(data []byte) (string, error) {
 	var sig []string
+	seenKeys := map[string]bool{}
 	for _, l := range strings.Split(string(data), "\n") {
+		if i := strings.IndexByte(l, '#'); i >= 0 {
+			l = l[:i]
+		}
 		t := strings.TrimSpace(l)
-		if t == "" || strings.HasPrefix(t, "#") {
+		if t == "" {
 			continue
 		}
-		if isKeyValueReserved(t) {
+		if key, ok := nvmrcKey(t); ok {
+			if key == "node" {
+				return "", fmt.Errorf(".nvmrc: %q is invalid for nvm (the version must be a bare line, not a node= setting); refusing to interpret it", t)
+			}
+			if seenKeys[key] {
+				return "", fmt.Errorf(".nvmrc: setting %q appears more than once, which nvm rejects; refusing to interpret it", key)
+			}
+			seenKeys[key] = true
 			continue
 		}
 		if len(sig) == 1 {
-			return "", fmt.Errorf(".nvmrc: multiple version selectors (%q and %q); WOMM v0.0.1 supports exactly one explicit version", sig[0], t)
+			return "", fmt.Errorf(".nvmrc: multiple version selectors (%q and %q); WOMM v0.1 supports exactly one explicit version", sig[0], t)
 		}
 		sig = append(sig, t)
 	}
 	if len(sig) == 0 {
-		return "", nil
+		return "", fmt.Errorf(".nvmrc exists but declares no version (nvm rejects such a file too); add an explicit x.y.z version or remove the file")
 	}
 	return sig[0], nil
 }
 
-// isKeyValueReserved reports lines of the KEY=value form that nvm
-// reserves and WOMM ignores for now.
-func isKeyValueReserved(t string) bool {
+// nvmrcKey reports whether t is a KEY=value settings line and returns
+// the trimmed key.
+func nvmrcKey(t string) (string, bool) {
 	i := strings.Index(t, "=")
 	if i <= 0 {
-		return false
+		return "", false
 	}
-	for _, ch := range t[:i] {
+	key := strings.TrimSpace(t[:i])
+	if key == "" {
+		return "", false
+	}
+	for _, ch := range key {
 		if !(ch == '_' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9') {
-			return false
+			return "", false
 		}
 	}
-	return true
+	return key, true
 }
 
 // utf8BOM is the byte-order mark some editors prepend to JSON files.
