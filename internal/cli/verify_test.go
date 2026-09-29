@@ -180,7 +180,7 @@ func TestVerifyCommandInconclusivePrecedence(t *testing.T) {
 					t.Errorf("stderr lacks %q:\n%s", w, stderr)
 				}
 			}
-			if strings.Contains(stderr, "Usage:") || strings.Contains(stderr, "Error: exit") {
+			if strings.Contains(stderr, "Usage:") || strings.Contains(stderr, "error: exit") {
 				t.Errorf("stderr leaks cobra output:\n%s", stderr)
 			}
 		})
@@ -218,8 +218,17 @@ func TestVerifyCommandConfigurationErrors(t *testing.T) {
 	}
 
 	t.Run("missing file", func(t *testing.T) {
-		code, _, stderr := runCLI(t, "verify", t.TempDir())
-		if code != 3 || !strings.Contains(stderr, "cannot read") {
+		dir := t.TempDir()
+		code, _, stderr := runCLI(t, "verify", dir)
+		if code != 3 || !strings.Contains(stderr, "no womm.yaml at "+filepath.Join(dir, "womm.yaml")) || !strings.Contains(stderr, "run `womm capture") {
+			t.Errorf("exit %d, stderr %q", code, stderr)
+		}
+	})
+	t.Run("file passed positionally", func(t *testing.T) {
+		dir := t.TempDir()
+		path := writeWomm(t, dir, "version: 1\nrequirements: []\n")
+		code, _, stderr := runCLI(t, "verify", path)
+		if code != 3 || !strings.Contains(stderr, "use --file") {
 			t.Errorf("exit %d, stderr %q", code, stderr)
 		}
 	})

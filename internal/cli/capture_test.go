@@ -182,4 +182,21 @@ func TestVersionCommand(t *testing.T) {
 	if code != 0 || stdout != "womm version "+version+"\n" {
 		t.Errorf("exit %d, stdout %q", code, stdout)
 	}
+	// `womm --version` is the same answer, not a usage error.
+	code, stdout, stderr := runCLI(t, "--version")
+	if code != 0 || stdout != "womm version "+version+"\n" || stderr != "" {
+		t.Errorf("--version: exit %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}
+
+func TestErrorPrefixIsUniform(t *testing.T) {
+	dir := writeProject(t, map[string]string{"package.json": `{"engines":`})
+	_, _, stderr := runCLI(t, "capture", dir)
+	if !strings.HasPrefix(stderr, "error: ") {
+		t.Errorf("execution error should start with 'error: ', got %q", stderr)
+	}
+	_, _, stderr = runCLI(t, "captur")
+	if !strings.HasPrefix(stderr, "error: ") {
+		t.Errorf("usage error should start with 'error: ', got %q", stderr)
+	}
 }

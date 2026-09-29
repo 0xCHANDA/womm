@@ -39,8 +39,9 @@ var version = "0.0.1-dev"
 // the CLI repeatedly in one process.
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
-		Use:   "womm",
-		Short: "Works On My Machine — development environment diagnostics",
+		Use:     "womm",
+		Version: version,
+		Short:   "Works On My Machine — development environment diagnostics",
 		Long: "Works On My Machine (womm) is an evidence-based CLI that " +
 			"discovers a project's declared requirements and verifies " +
 			"whether this machine satisfies them.\n\n" +
@@ -51,6 +52,10 @@ func newRootCmd() *cobra.Command {
 	// Keep the public surface minimal: no generated completion
 	// commands until the contract documents them.
 	root.CompletionOptions.DisableDefaultCmd = true
+	root.SetVersionTemplate("womm version {{.Version}}\n")
+	// One prefix for every failure line on stderr: cobra's own errors
+	// and the diagnostics verify prints share the same stream.
+	root.SetErrPrefix("error:")
 	root.AddCommand(newVersionCmd())
 	root.AddCommand(newCaptureCmd())
 	root.AddCommand(newVerifyCmd())
