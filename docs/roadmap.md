@@ -32,22 +32,26 @@ as future is implemented. PRs update this file; they don't improvise.
   summary counts); PASS/FAIL/UNKNOWN/UNREACHABLE labels; unknown
   statuses refused. Presentation only; exit-code **1** semantics
   arrive with `verify`. Not wired to the CLI.
+- **`womm capture`** (`internal/capture`, `internal/cli`, PR #7) —
+  detect → deterministic `womm.yaml` (requirements sorted by name,
+  evidence preserved verbatim, `requirements: []` when nothing is
+  declared); `schema.Marshal` validated + round-trip checked;
+  `--output`, `--force` (overwrites a regular file, never a
+  symlink, never a merge); detection errors → exit 3, nothing
+  written.
 
 ## Next vertical slices (order)
 
-1. **`womm capture`** — detect → write `womm.yaml` (evidence-backed
-   only; explicit over inferred; `--force` overwrites a file, never a
-   conflict check).
-2. **`womm verify`** — load `womm.yaml` → inspect → compare → report;
+1. **`womm verify`** — load `womm.yaml` → inspect → compare → report;
    the first consumer of the full pipeline.
-3. **CLI UX + E2E** — flow wiring, help surfaces, end-to-end tests on
+2. **CLI UX + E2E** — flow wiring, help surfaces, end-to-end tests on
    the real pipeline.
-4. **Hardening (security/fuzz/property)** — fuzz the parsers
+3. **Hardening (security/fuzz/property)** — fuzz the parsers
    (`schema`, `nvmrc`, `packageManager`), property tests for
    `compare` determinism, remove holes documented in code comments.
-5. **Docs / release** — README final shape, `CHANGELOG`, tag `v0.0.1`,
+4. **Docs / release** — README final shape, `CHANGELOG`, tag `v0.0.1`,
    release notes.
-6. **Only after all of the above: new ecosystems** (Python, Docker,
+5. **Only after all of the above: new ecosystems** (Python, Docker,
    Go detectors; PostgreSQL/Redis services). Every new ecosystem is
    its own slice: detector + inspector + tests, no cross-cutting
    refactors.
