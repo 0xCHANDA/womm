@@ -48,5 +48,16 @@ type Inspector interface {
 	// genuine inspection failure (unsupported tool, execution
 	// failure, timeout, cancellation) — never merely because the tool
 	// is not installed.
+	//
+	// Partial observations: when presence was already established
+	// (the tool resolved and was started) but the query itself
+	// failed, Inspect returns Observation{Name: req.Name, Present:
+	// true} together with the error. The Observation then carries
+	// exactly what is known — the target exists — and nothing more
+	// (no version). Callers map that pair to core.StatusUnreachable.
+	// When presence was never established (unsupported tool,
+	// resolution failure) the Observation is the zero value: nothing
+	// is known, and the error is an operational failure, not an
+	// unreachable target. An Inspector never fabricates presence.
 	Inspect(ctx context.Context, req core.Requirement) (core.Observation, error)
 }

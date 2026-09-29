@@ -121,7 +121,12 @@ func (n *NodeInspector) Inspect(ctx context.Context, req core.Requirement) (core
 
 	out, err := n.probe(ctx, path)
 	if err != nil {
-		return core.Observation{}, fmt.Errorf("inspecting %s: %w", req.Name, err)
+		// Presence was established above (the binary resolved and
+		// was started); only the query failed. Return that knowledge
+		// as a partial observation alongside the error, so a caller
+		// can tell "present but unqueryable" (unreachable) apart
+		// from "nothing is known" — see inspect.Inspector.
+		return core.Observation{Name: req.Name, Present: true}, fmt.Errorf("inspecting %s: %w", req.Name, err)
 	}
 
 	return core.Observation{

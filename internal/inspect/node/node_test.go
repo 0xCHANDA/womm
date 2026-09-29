@@ -471,3 +471,68 @@ func TestParseVersion(t *testing.T) {
 		}
 	}
 }
+
+// --- partial observations on probe failure ---------------------------
+
+// TestInspectProbeFailureReportsPresence pins the partial-observation
+// contract: once the binary resolved and started, a failed query must
+// still say "present" (and nothing else) next to the error, so the
+// verify layer can classify the target as unreachable rather than as
+// unknown or absent.
+func TestInspectProbeFailureReportsPresence(t *testing.T) {
+	cases := map[string]struct {
+		script  string
+		timeout time.Duration
+		wantErr error
+	}{
+		"non-zero exit":  {script: "echo boom >&2\nexit 7\n", timeout: probeTimeout},
+		"timeout":        {script: "sleep 30\n", timeout: 100 * time.Millisecond, wantErr: ErrProbeTimeout},
+		"not executable": {script: "", timeout: probeTimeout},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := writeFakeTool(t, t.TempDir(), "npm", tc.script)
+			if name == "not executable" {
+				if err := os.Chmod(path, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			insp := &NodeInspector{
+				resolvePath: staticResolver(map[string]string{"npm": path}),
+				runDir:      t.TempDir(),
+				timeout:     tc.timeout,
+			}
+			obs, err := insp.Inspect(context.Background(), core.Requirement{Name: "npm"})
+			if err == nil {
+				t.Fatal("expected an inspection error")
+			}
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tc.wantErr)
+			}
+			want := core.Observation{Name: "npm", Present: true}
+			if obs != want {
+				t.Fatalf("Observation = %#v, want %#v (present, no version)", obs, want)
+			}
+		})
+	}
+}
+
+// TestInspectNoPresenceWithoutResolution pins the other half of the
+// contract: when presence was never established, the observation is
+// the zero value — nothing is fabricated for the caller to map.
+func TestInspectNoPresenceWithoutResolution(t *testing.T) {
+	insp := newTestInspector(staticResolver(nil), t.TempDir())
+	obs, err := insp.Inspect(context.Background(), core.Requirement{Name: "docker"})
+	if !errors.Is(err, ErrUnsupportedTool) {
+		t.Fatalf("error = %v, want ErrUnsupportedTool", err)
+	}
+	if obs != (core.Observation{}) {
+		t.Fatalf("Observation = %#v, want zero value", obs)
+	}
+
+	broken := func(string) (string, error) { return "", errors.New("permission denied") }
+	obs, err = newTestInspector(broken, t.TempDir()).Inspect(context.Background(), core.Requirement{Name: "node"})
+	if err == nil || obs != (core.Observation{}) {
+		t.Fatalf("resolution failure: obs=%#v err=%v; want zero observation and an error", obs, err)
+	}
+}
