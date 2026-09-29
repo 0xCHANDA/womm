@@ -11,6 +11,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 
 	"github.com/0xCHANDA/womm/internal/core"
+	"github.com/0xCHANDA/womm/internal/semverrange"
 )
 
 // ErrEvidenceConflict marks incompatible declarations for the same
@@ -115,7 +116,7 @@ func (NodeDetector) Detect(_ context.Context, projectRoot string) ([]core.Requir
 	if err != nil {
 		return nil, fmt.Errorf(".nvmrc: internal constraint error for %q: %w", nvm.constraint, err)
 	}
-	ec, err := semver.NewConstraint(engines.constraint)
+	ec, err := semverrange.Parse(engines.constraint)
 	if err != nil {
 		return nil, unsupportedConstraint("package.json → engines.node", engines.constraint)
 	}
@@ -137,7 +138,7 @@ func (NodeDetector) Detect(_ context.Context, projectRoot string) ([]core.Requir
 // values outside our semver policy: never guessed, never silently
 // compatible.
 func unsupportedConstraint(source, constraint string) error {
-	return fmt.Errorf("%s: unsupported node constraint %q (semver-compatible formats only; 'lts/*'-style values are not interpreted)", source, constraint)
+	return fmt.Errorf("%s: unsupported node constraint %q (npm semver range syntax only; 'lts/*'-style values, comma-separated sets and '!=' are not interpreted)", source, constraint)
 }
 
 // nvmrcCandidate converts .nvmrc content into its single supported

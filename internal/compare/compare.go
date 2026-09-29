@@ -15,6 +15,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 
 	"github.com/0xCHANDA/womm/internal/core"
+	"github.com/0xCHANDA/womm/internal/semverrange"
 )
 
 var (
@@ -26,8 +27,8 @@ var (
 	// observation is not evidence of anything and must never be resolved
 	// into a compatibility verdict.
 	ErrInconsistentObservation = errors.New("inconsistent observation: absent target with a version")
-	// ErrInvalidConstraint means a non-present requirement is not a valid
-	// semver constraint.
+	// ErrInvalidConstraint means a non-present requirement is neither an
+	// exact version nor a range in npm's grammar (see semverrange).
 	ErrInvalidConstraint = errors.New("invalid requirement constraint")
 	// ErrInvalidObservedVersion means a present target reported a non-empty
 	// version that is not strict semver.
@@ -68,8 +69,8 @@ var (
 //   - "present": the target must exist; its version is irrelevant.
 //   - an exact strict semver version ("24.7.0", "4.0.0-rc.1"): the observed
 //     version must be exactly equal (prerelease and all).
-//   - any other valid range (">=22 <25", "^20.10.0", "20.x"): evaluated for
-//     release versions only. A prerelease observation against a range is
+//   - any other range in npm's grammar (">=22 <25", "^20.10.0", "20.x";
+//     see package semverrange): evaluated for release versions only. A prerelease observation against a range is
 //     StatusUnknown + ErrPrereleaseRange (see that error for why).
 func Compare(req core.Requirement, obs core.Observation) (core.Match, error) {
 	match := core.Match{Requirement: req, Observation: obs}
@@ -100,7 +101,7 @@ func Compare(req core.Requirement, obs core.Observation) (core.Match, error) {
 		return match, nil
 	}
 
-	constraint, err := semver.NewConstraint(req.Constraint)
+	constraint, err := semverrange.Parse(req.Constraint)
 	if err != nil {
 		match.Status = core.StatusUnknown
 		match.Reason = "requirement constraint is invalid"

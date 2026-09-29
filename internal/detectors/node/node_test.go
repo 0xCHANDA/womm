@@ -427,3 +427,22 @@ func TestSymlinkContainment(t *testing.T) {
 		}
 	})
 }
+
+// TestNodeDetectorRejectsNonNpmRangeSyntax pins that engines.node values
+// Masterminds/semver would parse but npm does not never become a
+// requirement: npm treats such a range as unsatisfiable, so accepting
+// it here could only produce a verdict npm contradicts.
+func TestNodeDetectorRejectsNonNpmRangeSyntax(t *testing.T) {
+	for _, engines := range []string{">=22, <25", "!=20.0.0", "=>22", "~>22.0", ">=22 ||", "22.0.0 -24"} {
+		t.Run(engines, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := writeFile(dir, "package.json", `{"engines":{"node":"`+engines+`"}}`); err != nil {
+				t.Fatal(err)
+			}
+			reqs, err := NewNodeDetector().Detect(context.Background(), dir)
+			if err == nil || !strings.Contains(err.Error(), "unsupported node constraint") {
+				t.Fatalf("engines.node %q: reqs=%v err=%v; want unsupported-constraint error", engines, reqs, err)
+			}
+		})
+	}
+}

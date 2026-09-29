@@ -28,6 +28,7 @@ comparison is pure logic; reporting is presentation only.
 | `internal/detectors/node` | L0 | merged (PR 2) | `NodeDetector` (package.json `engines.node` + `.nvmrc`, conflict-safe) and `PackageManagerDetector` (`packageManager`, Corepack hash subset) |
 | `internal/inspect` | L1 | merged (PR 3, 8) | `Inspector` boundary: demand-driven machine observation → `core.Observation`; partial `Observation{Present: true}` next to a probe error |
 | `internal/inspect/node` | L1 | merged (PR 3) | `NodeInspector`: node/npm/pnpm/yarn `--version` probes with full L1 containment |
+| `internal/semverrange` | logic | merged (PR 10) | npm range grammar gate over Masterminds/semver: rejects `,`, `!=`, `=>`, `=<`, `~>`, empty sets, qualifiers on wildcards; normalizes whitespace |
 | `internal/compare` | logic | merged (PR 4) | pure `Compare(req, obs) → core.Match`; exact versions by equality, ranges for release versions only, prerelease-vs-range refused |
 | `internal/capture` | orchestration (L0) | merged (PR 7) | `Capture(root)`: run the fixed detector set → sorted `schema.File`; `Write(path, file, force)`: never follows symlinks, never overwrites without `--force` |
 | `internal/verify` | orchestration | merged (PR 8) | `Verify(file, inspectors) → Result{Matches, Errors}`: inspect → compare, maps known-present probe failures to `unreachable`; `ExitCode(Result)` |
@@ -47,7 +48,9 @@ comparison is pure logic; reporting is presentation only.
    `unknown`) and a deterministic, human-readable `Reason`.
    Pure: no I/O, no process execution, no printing. Constraint
    semantics: `present` (existence only), an exact strict semver
-   version (equality, prerelease included), or a range evaluated for
+   version (equality, prerelease included), or a range in npm's
+   grammar (`semverrange.Parse`; Masterminds-only syntax such as
+   `>=22, <25` or `!=` is `ErrInvalidConstraint`) evaluated for
    release versions only. Three undecidable inputs are `unknown` plus
    a sentinel, never a verdict: a contradictory observation
    (`Present: false` with a version, `ErrInconsistentObservation`), a
