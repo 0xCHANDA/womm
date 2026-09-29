@@ -141,7 +141,8 @@ CI (`.github/workflows/ci.yml`) re-runs these plus a
   pnpm self-version-management off; working directory `/` (never the
   project root, never `os.TempDir()`).
 - **Bounded execution**: 5s probe timeout with process-group kill and
-  `WaitDelay`; output capped at 4KiB.
+  `WaitDelay`; child subreaper kills `setsid` escapees; output capped
+  at 4KiB.
 - **Openness is an observation, not an error**: a missing binary is
   `Observation{Present: false}` — reported, never guessed around.
 
