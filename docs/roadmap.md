@@ -1,4 +1,4 @@
-# Roadmap — status as observed on `main` (v0.0.1 slice)
+# Roadmap — status as observed on `main` (v0.1 slice)
 
 This file is the only place where the plan lives. Statuses reflect
 reality: nothing listed as "completed" is aspirational, nothing listed
@@ -63,16 +63,25 @@ as future is implemented. PRs update this file; they don't improvise.
   and presence-less inspection failures stay operational errors.
   Exit codes 0/1/2/3 fully produced (3 beats 1).
 
+- **CLI UX + E2E** (PR #9) — end-to-end suite over realistic
+  fixtures with explicit machine profiles, repeated-run determinism,
+  compiled-binary exit codes.
+- **Hardening: fuzz** (PR #13) — fuzz targets for `schema`, `.nvmrc`,
+  `packageManager`, `package.json`, `compare`, `report`; the report
+  now escapes evidence source/field (found by fuzzing).
+- **Docs / release readiness** (PR #14) — README rewritten to the
+  real surface, `CHANGELOG.md` with the v0.1.0 candidate notes,
+  version settable from the tag via `-ldflags -X`.
+
+## Remaining before a release
+
+1. **Human decision: tag.** Everything above is on `main`; cutting
+   the first tag (`v0.1.0` per the release notes) is a human action —
+   no session tags or publishes.
+
 ## Next vertical slices (order)
 
-1. **CLI UX + E2E** — flow wiring, help surfaces, end-to-end tests on
-   the real pipeline.
-2. **Hardening (security/fuzz/property)** — fuzz the parsers
-   (`schema`, `nvmrc`, `packageManager`), property tests for
-   `compare` determinism, remove holes documented in code comments.
-3. **Docs / release** — README final shape, `CHANGELOG`, tag `v0.0.1`,
-   release notes.
-4. **Only after all of the above: new ecosystems** (Python, Docker,
+1. **Only after the release: new ecosystems** (Python, Docker,
    Go detectors; PostgreSQL/Redis services). Every new ecosystem is
    its own slice: detector + inspector + tests, no cross-cutting
    refactors.

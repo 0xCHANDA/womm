@@ -76,11 +76,32 @@ there is no public Go API; the CLI is the API.
   `%w` context; user-facing wording speaks the user's problem, not
   internal terminology.
 
+## Fuzzing
+
+Every parser and the renderer has a fuzz target whose seed corpus runs
+as an ordinary test. To fuzz for real:
+
+```sh
+go test -run '^$' -fuzz '^FuzzParse$' -fuzztime 30s ./internal/schema/
+go test -run '^$' -fuzz '^FuzzParse$' -fuzztime 30s ./internal/semverrange/
+go test -run '^$' -fuzz '^FuzzPackageJSON$' -fuzztime 30s ./internal/detectors/node/
+go test -run '^$' -fuzz '^FuzzCompare$' -fuzztime 30s ./internal/compare/
+go test -run '^$' -fuzz '^FuzzRender$' -fuzztime 30s ./internal/report/
+```
+
+A crasher lands in `testdata/fuzz/<Target>/`; commit it with the fix.
+
 ## Versioning / release policy (pre-release)
 
-- `internal/cli` holds the literal version (`0.0.1-dev`). There are
-  **no git tags and no releases yet** — intentional until the
-  vertical slice is reviewed for release.
-- When the slice closes: tag `v0.0.1` on `main`, wire the version to
-  build metadata (`-ldflags "-X ...cli.version=x"` or similar), add a
-  short `CHANGELOG`. Do **not** bump versions from a feature slice.
+- `internal/cli` holds the development literal (`0.0.1-dev`) in
+  `var version`; a release build sets it from the tag:
+
+  ```sh
+  go build -ldflags "-X github.com/0xCHANDA/womm/internal/cli.version=0.1.0" ./cmd/womm
+  ```
+
+- There are **no git tags and no releases yet**. `CHANGELOG.md` holds
+  the candidate notes for the first tag; cutting the tag is a human
+  decision, never an agent action.
+- Do **not** bump the version literal from a feature slice; the tag
+  carries the version.

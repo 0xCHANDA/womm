@@ -23,9 +23,10 @@ works on my machine" becomes a report, not an anecdote.
 - **Not a guessing tool.** Ambiguous or malformed declarations are
   hard errors, never silently interpreted into a requirement.
 
-Current status: v0.1 vertical slice (Linux + Node.js) is functionally
-complete: `capture` and `verify` work end to end. See
-`docs/roadmap.md` for what is real vs. pending.
+Current status: the v0.1 vertical slice (Linux + Node.js) is complete
+on `main`: `capture` and `verify` work end to end, hardened and
+fuzzed; release notes live in `CHANGELOG.md`; the first tag is a
+human decision. See `docs/roadmap.md` for what is real vs. pending.
 
 ## Architecture
 

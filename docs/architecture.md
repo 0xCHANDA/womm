@@ -21,7 +21,7 @@ comparison is pure logic; reporting is presentation only.
 | Package | Layer | Status | Responsibility |
 |---|---|---|---|
 | `cmd/womm` | CLI | merged (PR 1) | `main` → `internal/cli.Execute` |
-| `internal/cli` | CLI | merged (PR 1, 7, 8) | cobra root + `version` + `capture` + `verify`; exit-code contract 0/1/2/3 fully produced; a fresh command tree per run |
+| `internal/cli` | CLI | merged (PR 1, 7, 8, 14) | cobra root + `version` + `capture` + `verify`; exit-code contract 0/1/2/3 fully produced; a fresh command tree per run; version settable via `-ldflags -X` |
 | `internal/core` | domain | merged (PR 1) | ecosystem-agnostic model: `Requirement`, `Evidence`, `Observation`, `Match`, `MatchStatus` |
 | `internal/schema` | persistence | merged (PR 1, PR 7) | `womm.yaml` schema v1: load, parse, validate, `Marshal` (deterministic, validated, round-trip safe); version-policy errors (`ErrVersion`), unknown-keys → warnings |
 | `internal/detectors` | L0 | merged (PR 2) | `Detector` boundary: project filesystem reads only → `core.Requirement` |
@@ -116,8 +116,8 @@ comparison is pure logic; reporting is presentation only.
 
 ## Known divergences from the conceptual model
 
-Documented on purpose — do not "resolve" these silently; they are the
-next slices (`docs/roadmap.md`):
+Documented on purpose — do not "resolve" these silently; they are
+deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
 
 1. `capture` does not detect conflicts with an existing womm.yaml
    (`--force` overwrites, it never merges).
