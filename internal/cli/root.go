@@ -23,8 +23,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// version is the development version of WOMM.
-const version = "0.0.1-dev"
+// version is the WOMM version printed by `womm version`. It is a
+// variable so a release build can set it from the tag:
+//
+//	go build -ldflags "-X github.com/0xCHANDA/womm/internal/cli.version=0.1.0" ./cmd/womm
+//
+// Source builds report the development literal below.
+var version = "0.0.1-dev"
 
 // newRootCmd builds a fresh command tree. A new tree per execution
 // keeps flag state from leaking between runs (cobra stores parsed
@@ -37,8 +42,9 @@ func newRootCmd() *cobra.Command {
 		Long: "Works On My Machine (womm) is an evidence-based CLI that " +
 			"discovers project requirements, verifies local environments " +
 			"and explains meaningful differences between machines.\n\n" +
-			"Currently in early development: `capture` writes a project's " +
-			"declared requirements to womm.yaml; `verify` is not available yet.",
+			"v0.1 (Linux + Node.js): `capture` writes a project's declared " +
+			"requirements to womm.yaml; `verify` checks this machine against " +
+			"them and exits 0/1/2/3 (see `womm verify --help`).",
 	}
 	// Keep the public surface minimal: no generated completion
 	// commands until the contract documents them.
