@@ -151,3 +151,25 @@ func FuzzParse(f *testing.F) {
 		}
 	})
 }
+
+func TestLoadRefusesSymlink(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "secret.yml")
+	if err := os.WriteFile(outside, []byte("github.com:\n  oauth_token: hunter2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	link := filepath.Join(dir, "womm.yaml")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	_, warnings, err := Load(link)
+	if !errors.Is(err, ErrSymlink) {
+		t.Fatalf("error = %v, want ErrSymlink", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("a refused file must not leak its keys through warnings: %v", warnings)
+	}
+	if !strings.Contains(err.Error(), "symbolic link") || strings.Contains(err.Error(), "oauth") {
+		t.Errorf("error = %q", err)
+	}
+}

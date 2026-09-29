@@ -22,9 +22,11 @@ import (
 	"github.com/0xCHANDA/womm/internal/schema"
 )
 
-// ErrUnsupportedRequirement marks a requirement no configured inspector
-// knows how to observe. It is an operational failure of this WOMM
-// build, not a statement about the machine: no match is fabricated.
+// ErrUnsupportedRequirement marks a declaration this WOMM build cannot
+// observe: a requirement no configured inspector supports, or a
+// womm.yaml section (services, environment) with no verifier yet. It
+// is an operational failure of the build, not a statement about the
+// machine: no match is fabricated and the run is inconclusive.
 var ErrUnsupportedRequirement = errors.New("no inspector supports requirement")
 
 // Exit codes of `womm verify`. The full contract lives in ExitCode.
@@ -68,6 +70,21 @@ func Verify(ctx context.Context, f *schema.File, inspectors []inspect.Inspector)
 	if f == nil {
 		res.Errors = append(res.Errors, errors.New("nil womm.yaml file"))
 		return res
+	}
+
+	// Declared sections this build cannot verify are operational
+	// errors, never silently skipped: a file that declares only
+	// services or environment variables must not verify as PASS.
+	names := make([]string, 0, len(f.Services))
+	for name := range f.Services {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		res.Errors = append(res.Errors, fmt.Errorf("%w: service %q (services are not verified by WOMM v0.1)", ErrUnsupportedRequirement, name))
+	}
+	if n := len(f.Environment.Required) + len(f.Environment.Optional); n > 0 {
+		res.Errors = append(res.Errors, fmt.Errorf("%w: environment section declares %d variable(s) (environment is not verified by WOMM v0.1)", ErrUnsupportedRequirement, n))
 	}
 
 	reqs := make([]core.Requirement, len(f.Requirements))
