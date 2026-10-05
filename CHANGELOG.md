@@ -54,7 +54,10 @@ candidate content for the first tag, to be cut by a human.
   `npm_config_manage_package_manager_versions=false`; `HOME` and
   `COREPACK_HOME` forced from the account's passwd entry, `XDG_*`
   cache/config, `LD_PRELOAD`/`LD_AUDIT`/`LD_LIBRARY_PATH`,
-  `NODE_V8_COVERAGE`/`NODE_REDIRECT_WARNINGS` stripped (#33); 5s timeout with
+  `NODE_V8_COVERAGE`/`NODE_REDIRECT_WARNINGS` stripped (#33; the
+  account home is read from `/etc/passwd` / the C library and never
+  falls back to the inherited `$HOME`, which `os/user` does without cgo
+  for a uid with no passwd entry — Docker `--user`, OpenShift); 5s timeout with
   process-group kill and a 2s wait backstop; output capped at 4 KiB;
   Ctrl-C, SIGTERM and SIGHUP kill a running probe and yield no
   verdict (no partial report, exit 3); WOMM is a child subreaper so a
