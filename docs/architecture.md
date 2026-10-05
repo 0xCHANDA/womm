@@ -202,6 +202,15 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
   `Observation.Path`.
 - Execution is direct (`exec.CommandContext`, absolute resolved path,
   fixed `--version` arg) — no shell, no npm scripts, no `npx`/corepack.
+- The probe environment is an **allowlist**: only locale settings
+  (`LANG`, `LANGUAGE`, `LC_*`) are inherited; everything else the probe
+  sees is forced (`PATH`, `HOME`, `COREPACK_*`, `YARN_IGNORE_PATH`,
+  `npm_config_manage_package_manager_versions`). Version-manager shims
+  are dispatchers steered by `VOLTA_HOME`, `MISE_*`, `ASDF_*`,
+  `XDG_DATA_HOME`... which a launcher can point into the project, so no
+  denylist can be complete. Cost: a tool that only starts with a custom
+  variable is reported `UNREACHABLE`. The stripped-variable notes below
+  remain true by construction.
 - `NODE_OPTIONS` is stripped from the probe environment (code-execution
   vector: `--require` runs arbitrary JS before `--version` prints);
   `PATH` inside the probe is replaced: the system allowlist, preceded

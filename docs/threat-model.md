@@ -16,6 +16,17 @@ non-goal.
 
 ## Environment variables: project-reachable vs user-owned
 
+**The probe's environment is an allowlist** (`LANG`, `LANGUAGE`, `LC_*`
+inherited; everything else forced). The per-variable rows below
+describe why each *specific* vector mattered; the allowlist is what
+makes the list of vectors unnecessary to keep complete. It was
+introduced when version-manager shims became executable: Volta, mise,
+asdf, nodenv and fnm launchers choose which binary to run from
+`VOLTA_HOME`, `MISE_*`, `ASDF_*`, `XDG_DATA_HOME`, ..., and a launcher
+that exports one of them pointing into the project would otherwise get
+project code executed behind a legitimate-looking `at <shim>` path
+(reproduced by a security review with the real Volta and mise).
+
 A project cannot set environment variables for the `womm` process
 directly. It can reach the environment only through a launcher the
 user chose to run it with:
