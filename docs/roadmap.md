@@ -117,6 +117,34 @@ as future is implemented. PRs update this file; they don't improvise.
    the first tag (`v0.1.0` per the release notes) is a human action —
    no session tags or publishes.
 
+## v0.2 — merged to `integration/v0.2` (not on `main`)
+
+`main` stays at the v0.1 release candidate until the owner tags v0.1;
+`integration/v0.2` is never merged into `main`. Status as merged:
+
+- **Version-managed Node** (PRs #37, #38, #43; proposal
+  `docs/proposals/version-managers.md`, implementation notes at its
+  end) — `Observation.Path` (executed binary as evidence);
+  `internal/inspect/toolpath` (ordered, validated search list);
+  `verify --tool-dir` (explicit directories, before the system ones);
+  fixed `~/.volta/bin`, `~/.asdf/shims`, `~/.local/share/mise/shims`,
+  `~/.local/bin` from the account's home (after the system ones); the
+  probe environment became an allowlist. `WOMM_TOOL_DIRS` deliberately
+  not implemented; nvm/fnm use `--tool-dir`.
+- **Machine-readable output** (PR #44; `docs/output-json.md`) —
+  `verify --format json`, schema version 1, public DTO, deterministic.
+- **Go ecosystem** (PR #45) — `go.mod` `go` directive → `go: >=V`,
+  `go version` probe, Go's own version order (not semver); shared
+  `internal/inspect/probe` and `internal/detectors/source`.
+- Three independent adversarial reviews per slice (correctness,
+  security boundary, test gaps) found and fixed real defects before
+  merge; they are recorded in the PR descriptions and CHANGELOG.
+- Release-blocking findings of the v0.1 audit were fixed on `main`
+  (#39, #40) and synced here (#42).
+
+Not done in v0.2 so far: `explain`/`diff`, services, any other
+ecosystem, nvm/fnm discovery, `go.work`.
+
 ## v0.2 candidates
 
 Ranked in `docs/proposals/v0.2.md`: version-managed Node installations
