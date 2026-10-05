@@ -105,14 +105,24 @@ func TestMissingShimDirsAreSilent(t *testing.T) {
 
 func TestNoHomeDisablesShimDirs(t *testing.T) {
 	withSystemDirs(t, tempDir(t))
-	_, dirs := shimHome(t, ".volta/bin")
-	for _, home := range []string{"", "relative/home", "~"} {
+	// A real, safe shim directory exists — but only reachable through a
+	// relative "home", which must never be used (the working directory
+	// is not trusted; the home comes from the user database).
+	base := tempDir(t)
+	if err := os.MkdirAll(filepath.Join(base, "home", ".volta", "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wd, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := os.Chdir(base); err != nil {
+		t.Fatal(err)
+	}
+	for _, home := range []string{"", "home", "./home", "~"} {
 		r := newOrFatal(t, Config{UserHome: home})
 		if len(r.Dirs()) != 1 || len(r.Warnings()) != 0 {
-			t.Errorf("UserHome %q: Dirs %+v, Warnings %q; want system only", home, r.Dirs(), r.Warnings())
+			t.Errorf("UserHome %q: Dirs %+v, Warnings %q; want system only and silence", home, r.Dirs(), r.Warnings())
 		}
 	}
-	_ = dirs
 }
 
 func TestUnsafeShimDirsAreSkippedWithAWarning(t *testing.T) {
