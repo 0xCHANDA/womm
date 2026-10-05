@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -450,5 +451,51 @@ func TestRenderJSONReplacesEachInvalidByte(t *testing.T) {
 	b := string(renderJSON(t, JSONDocument{Result: "pass", Matches: []core.Match{match("n", "x\xff", core.Observation{}, core.StatusFail, "r")}}))
 	if a == b {
 		t.Error("different invalid byte runs rendered identically")
+	}
+}
+
+// A failure to write the document is an error, never swallowed (the CLI
+// turns it into a non-zero exit even for a FAIL verdict).
+func TestRenderJSONPropagatesWriteErrors(t *testing.T) {
+	sentinel := errors.New("write failed")
+	if err := RenderJSON(failingWriter{sentinel}, jsonScenarios()["pass"]); !errors.Is(err, sentinel) {
+		t.Fatalf("error = %v, want the writer's error", err)
+	}
+}
+
+func TestRenderJSONUnknownStatusIsErrUnknownStatus(t *testing.T) {
+	err := RenderJSON(&bytes.Buffer{}, JSONDocument{Matches: []core.Match{{Requirement: core.Requirement{Name: "x"}, Status: "weird"}}})
+	if !errors.Is(err, ErrUnknownStatus) {
+		t.Fatalf("error = %v, want ErrUnknownStatus", err)
+	}
+}
+
+// The UTF-8 repair applies to EVERY string field, and an absent tool
+// that nevertheless has a path keeps it (host evidence is never hidden).
+func TestRenderJSONRepairsEveryStringField(t *testing.T) {
+	bad := "x\xffy"
+	m := match(bad, bad, core.Observation{Present: false, Version: bad, Path: bad}, core.StatusUnknown, bad, ev(bad, bad, bad))
+	raw := renderJSON(t, JSONDocument{Result: "inconclusive", ExitCode: 3, Matches: []core.Match{m}, Diagnostics: []Diagnostic{{Kind: bad, Message: bad}}})
+	var d struct {
+		Requirements []struct {
+			Name, Constraint, Reason string
+			Observation              struct{ Version, Path *string }
+			Evidence                 []struct{ Source, Field, Value string }
+		}
+		Errors []struct{ Kind, Message string }
+	}
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	want := "x�y"
+	r := d.Requirements[0]
+	got := []string{r.Name, r.Constraint, r.Reason, *r.Observation.Version, *r.Observation.Path, r.Evidence[0].Source, r.Evidence[0].Field, r.Evidence[0].Value, d.Errors[0].Kind, d.Errors[0].Message}
+	for i, g := range got {
+		if g != want {
+			t.Errorf("field %d = %q, want %q", i, g, want)
+		}
+	}
+	if strings.Contains(string(raw), "\\ufffd") || !strings.Contains(string(raw), "x\ufffdy") {
+		t.Errorf("replacement should be written as the character itself, not an escape:\n%s", raw)
 	}
 }
