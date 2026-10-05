@@ -1,6 +1,6 @@
 //go:build cgo && !osusergo
 
-package node
+package toolpath
 
 import (
 	"os/user"

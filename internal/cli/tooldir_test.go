@@ -282,3 +282,135 @@ func TestVerifyToolDirOwnedByAnotherUserWarnsButWorks(t *testing.T) {
 		t.Errorf("stderr lacks %q:\n%s", want, stderr)
 	}
 }
+
+// --- implicit version-manager shim directories ---------------------------
+
+func useHome(t *testing.T, home string) {
+	t.Helper()
+	prev := accountHome
+	accountHome = func() string { return home }
+	t.Cleanup(func() { accountHome = prev })
+}
+
+func TestVerifyFindsAVoltaShapedNodeInTheAccountHome(t *testing.T) {
+	project, sys, home := realInspectorProject(t), realDir(t), realDir(t)
+	useSystemDirs(t, sys)
+	useHome(t, home)
+	voltaBin := filepath.Join(home, ".volta", "bin")
+	if err := os.MkdirAll(voltaBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	node := fakeTool(t, voltaBin, "node", "echo v24.7.0\n")
+
+	code, stdout, stderr := runCLI(t, "verify", project)
+	if code != 0 || !strings.Contains(stdout, "PASS        node required >=22 <25; observed 24.7.0 at "+node+"\n") {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want silence for a safe shim directory", stderr)
+	}
+
+	// A system node always wins over the shim directory: v0.1 behaviour
+	// on machines that have one is unchanged.
+	sysNode := fakeTool(t, sys, "node", "echo v12.22.0\n")
+	code, stdout, _ = runCLI(t, "verify", project)
+	if code != 1 || !strings.Contains(stdout, "observed 12.22.0 at "+sysNode+"\n") {
+		t.Fatalf("with a system node: exit %d\n%s", code, stdout)
+	}
+	// And --tool-dir beats both.
+	code, stdout, _ = runCLI(t, "verify", project, "--tool-dir", voltaBin)
+	if code != 0 || !strings.Contains(stdout, "observed 24.7.0 at "+node+"\n") {
+		t.Fatalf("with --tool-dir: exit %d\n%s", code, stdout)
+	}
+}
+
+func TestVerifySkipsUnsafeShimDirsWithAWarningAndStillDecides(t *testing.T) {
+	project, sys, home := realInspectorProject(t), realDir(t), realDir(t)
+	useSystemDirs(t, sys)
+	useHome(t, home)
+	bad := filepath.Join(home, ".volta", "bin")
+	if err := os.MkdirAll(bad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(home, "pwned")
+	fakeTool(t, bad, "node", "touch '"+marker+"'\necho v24.7.0\n")
+	if err := os.Chmod(bad, 0o777); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI(t, "verify", project)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("a binary from a world-writable shim directory was executed")
+	}
+	if code != 1 || !strings.Contains(stdout, "FAIL        node required >=22 <25; observed absent\n") {
+		t.Fatalf("exit %d\n%s", code, stdout)
+	}
+	if want := "warning: tool directory " + bad + " skipped: is world-writable"; !strings.Contains(stderr, want) {
+		t.Errorf("stderr lacks %q:\n%s", want, stderr)
+	}
+}
+
+func TestVerifyNeverSearchesTheInheritedHome(t *testing.T) {
+	project, sys, realHome := realInspectorProject(t), realDir(t), realDir(t)
+	useSystemDirs(t, sys)
+	useHome(t, realHome) // the account's home: has no shim directories
+
+	// $HOME points into the project, which ships its own ~/.volta/bin.
+	evilBin := filepath.Join(project, ".volta", "bin")
+	if err := os.MkdirAll(evilBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(project, "pwned")
+	fakeTool(t, evilBin, "node", "touch '"+marker+"'\necho v24.7.0\n")
+	t.Setenv("HOME", project)
+
+	code, stdout, _ := runCLI(t, "verify", project)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the project's ~/.volta/bin/node was executed through $HOME")
+	}
+	if code != 1 || !strings.Contains(stdout, "observed absent") {
+		t.Fatalf("exit %d\n%s", code, stdout)
+	}
+}
+
+func TestVerifyRunFromTheHomeDirectoryDoesNotTrustItsOwnShims(t *testing.T) {
+	sys, home := realDir(t), realDir(t)
+	useSystemDirs(t, sys)
+	useHome(t, home)
+	voltaBin := filepath.Join(home, ".volta", "bin")
+	if err := os.MkdirAll(voltaBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fakeTool(t, voltaBin, "node", "echo v24.7.0\n")
+	writeWomm(t, home, nodeReq) // the project IS the home directory
+
+	code, stdout, stderr := runCLI(t, "verify", home)
+	if code != 1 || !strings.Contains(stdout, "observed absent") {
+		t.Fatalf("exit %d\n%s", code, stdout)
+	}
+	if !strings.Contains(stderr, "inside the project") {
+		t.Errorf("stderr lacks the reason:\n%s", stderr)
+	}
+}
+
+func TestVerifyShimSymlinkIntoProjectIsRefused(t *testing.T) {
+	project, sys, home := realInspectorProject(t), realDir(t), realDir(t)
+	useSystemDirs(t, sys)
+	useHome(t, home)
+	bin := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(project, "pwned")
+	evil := fakeTool(t, project, "evil-node", "touch '"+marker+"'\necho v24.7.0\n")
+	if err := os.Symlink(evil, filepath.Join(bin, "node")); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := runCLI(t, "verify", project)
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the project's binary was executed through a shim-directory symlink")
+	}
+	if code != 3 || strings.Contains(stdout, "PASS") || !strings.Contains(stderr, "unsafe executable") {
+		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+}

@@ -379,21 +379,17 @@ var forcedEnv = []string{
 }
 
 // accountHome is the home directory of the account WOMM runs as,
-// taken from the user database (see lookupHome) — never from the
-// inherited $HOME, which a launcher can point into a project. Corepack shims resolve their cache from it and package
+// taken from the user database (see toolpath.AccountHome) — never from
+// the inherited $HOME, which a launcher can point into a project. Corepack shims resolve their cache from it and package
 // managers read their user config from it; both must be the user's
 // own. When the account has no home directory a non-existent path is
 // used: cached shims then fail fast and are reported as unreachable
 // rather than run from an attacker-chosen directory.
 var accountHome = resolveAccountHome()
 
-func resolveAccountHome() string { return accountHomeFor(lookupHome, os.Getuid()) }
-
-// accountHomeFor returns the absolute home directory lookup reports
-// for uid, or "/nonexistent". It must never consult the environment.
-func accountHomeFor(lookup func(uid int) (string, bool), uid int) string {
-	if home, ok := lookup(uid); ok && filepath.IsAbs(home) {
-		return filepath.Clean(home)
+func resolveAccountHome() string {
+	if home := toolpath.AccountHome(); home != "" {
+		return home
 	}
 	return "/nonexistent"
 }

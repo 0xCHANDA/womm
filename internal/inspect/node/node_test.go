@@ -941,27 +941,3 @@ func TestAccountHomeChild(t *testing.T) {
 		}
 	}
 }
-
-// TestAccountHomeForNeverFallsBackToTheEnvironment pins the contract at
-// unit level, where it runs everywhere (the subprocess test above needs
-// root and a cgo-less build): a failed lookup is "/nonexistent", whatever
-// HOME and USER say.
-func TestAccountHomeForNeverFallsBackToTheEnvironment(t *testing.T) {
-	t.Setenv("HOME", "/evil/project")
-	t.Setenv("USER", "ci")
-	cases := []struct {
-		name   string
-		lookup func(int) (string, bool)
-		want   string
-	}{
-		{"unknown uid", func(int) (string, bool) { return "", false }, "/nonexistent"},
-		{"relative passwd home", func(int) (string, bool) { return "evil/relative", true }, "/nonexistent"},
-		{"empty passwd home", func(int) (string, bool) { return "", true }, "/nonexistent"},
-		{"passwd home is cleaned", func(int) (string, bool) { return "/home/u/", true }, "/home/u"},
-	}
-	for _, tc := range cases {
-		if got := accountHomeFor(tc.lookup, 1234); got != tc.want {
-			t.Errorf("%s: home = %q, want %q", tc.name, got, tc.want)
-		}
-	}
-}
