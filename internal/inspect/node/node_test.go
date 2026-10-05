@@ -4,8 +4,12 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -757,5 +761,99 @@ func TestInspectSweepsEscapeeAfterSuccessfulProbe(t *testing.T) {
 	after, _ := os.ReadFile(log)
 	if len(after) > len(before) {
 		t.Fatalf("detached descendant survived a successful probe (log grew %d -> %d bytes)", len(before), len(after))
+	}
+}
+
+// TestAccountHomeIgnoresInheritedHomeForUIDWithoutPasswdEntry reproduces
+// the hole left by the account-home fix: os/user.Current() falls back to
+// $HOME (when $USER is set too) if the uid has no passwd entry — Docker
+// `--user 1234`, OpenShift, many CI images — and the forced HOME /
+// COREPACK_HOME handed to the probe were then exactly the inherited,
+// project-reachable values the fix was meant to remove. The in-process
+// accountHome cannot show it (it is computed at init, and the test uid
+// has a passwd entry), so the test binary re-runs itself as a uid that
+// has none, with a hostile HOME and a USER set.
+func TestAccountHomeIgnoresInheritedHomeForUIDWithoutPasswdEntry(t *testing.T) {
+	if os.Getenv("WOMM_ACCOUNT_HOME_CHILD") == "1" {
+		return // the child half is TestAccountHomeChild
+	}
+	if os.Geteuid() != 0 {
+		t.Skip("needs root to run as a uid without a passwd entry")
+	}
+	const uid = 54321
+	if _, err := user.LookupId(strconv.Itoa(uid)); err == nil {
+		t.Skipf("uid %d unexpectedly has a passwd entry", uid)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The go-build directory is not searchable by another uid.
+	dir, err := os.MkdirTemp("", "womm-accounthome")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	copyPath := filepath.Join(dir, "node.test")
+	data, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(copyPath, data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(copyPath, "-test.run=^TestAccountHomeChild$", "-test.v")
+	cmd.Dir = dir
+	cmd.Env = []string{"WOMM_ACCOUNT_HOME_CHILD=1", "USER=ci", "HOME=/evil/project"}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: uid, Gid: uid}}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("child failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "--- PASS: TestAccountHomeChild") {
+		t.Fatalf("child did not run:\n%s", out)
+	}
+}
+
+// TestAccountHomeChild is the half that runs as the passwd-less uid.
+func TestAccountHomeChild(t *testing.T) {
+	if os.Getenv("WOMM_ACCOUNT_HOME_CHILD") != "1" {
+		t.Skip("run by TestAccountHomeIgnoresInheritedHomeForUIDWithoutPasswdEntry")
+	}
+	if got := resolveAccountHome(); got != "/nonexistent" {
+		t.Fatalf("account home = %q with HOME=/evil/project, USER=ci and no passwd entry; want /nonexistent (the inherited HOME must never be used)", got)
+	}
+	for _, kv := range sanitizedEnv() {
+		if strings.Contains(kv, "/evil/project") {
+			t.Errorf("hostile HOME reached the probe environment: %s", kv)
+		}
+	}
+}
+
+// TestAccountHomeForNeverFallsBackToTheEnvironment pins the contract at
+// unit level, where it runs everywhere (the subprocess test above needs
+// root and a cgo-less build): a failed lookup is "/nonexistent", whatever
+// HOME and USER say.
+func TestAccountHomeForNeverFallsBackToTheEnvironment(t *testing.T) {
+	t.Setenv("HOME", "/evil/project")
+	t.Setenv("USER", "ci")
+	cases := []struct {
+		name   string
+		lookup func(int) (string, bool)
+		want   string
+	}{
+		{"unknown uid", func(int) (string, bool) { return "", false }, "/nonexistent"},
+		{"relative passwd home", func(int) (string, bool) { return "evil/relative", true }, "/nonexistent"},
+		{"empty passwd home", func(int) (string, bool) { return "", true }, "/nonexistent"},
+		{"passwd home is cleaned", func(int) (string, bool) { return "/home/u/", true }, "/home/u"},
+	}
+	for _, tc := range cases {
+		if got := accountHomeFor(tc.lookup, 1234); got != tc.want {
+			t.Errorf("%s: home = %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }
