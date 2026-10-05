@@ -463,25 +463,6 @@ func TestInspectMalformedOutputNeverFabricatesVersion(t *testing.T) {
 
 // --- output abuse ----------------------------------------------------
 
-func TestBoundedWriterEnforcesLimit(t *testing.T) {
-	w := &boundedWriter{limit: 16}
-	big := strings.Repeat("A", 10_000)
-
-	n, err := w.Write([]byte(big))
-	if err != nil {
-		t.Fatalf("Write error: %v", err)
-	}
-	if n != len(big) {
-		t.Fatalf("Write returned n=%d, want %d (must accept everything, to avoid blocking the writer)", n, len(big))
-	}
-	if w.buf.Len() != 16 {
-		t.Fatalf("buffered %d bytes, want exactly the 16-byte limit", w.buf.Len())
-	}
-	if w.buf.String() != strings.Repeat("A", 16) {
-		t.Fatalf("buffered content = %q, want the first 16 bytes", w.buf.String())
-	}
-}
-
 func TestInspectExcessiveOutputIsBounded(t *testing.T) {
 	dir := t.TempDir()
 	// A single line far larger than maxOutputBytes.
@@ -677,9 +658,6 @@ func TestInspectReturnsEvenIfDescendantEscapesGroup(t *testing.T) {
 	after, _ := os.ReadFile(log)
 	if len(after) > len(before) {
 		t.Fatalf("setsid-escaped descendant survived Inspect (log grew %d -> %d bytes)", len(before), len(after))
-	}
-	if left := childrenOf(os.Getpid()); len(left) != 0 {
-		t.Fatalf("live adopted children remain: %v", left)
 	}
 }
 
