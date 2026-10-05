@@ -65,8 +65,8 @@ Every field is always present, in this order. Lists are `[]`, never
 | `…observation.version` | The observed version, or `null` when unknown or absent. |
 | `…observation.path` | The executable that was started, or `null` when nothing ran (absent tool). Host state, shown for explanation; never part of the comparison and never written to `womm.yaml`. |
 | `…evidence[]` | The project evidence behind the requirement, verbatim (`source`, `field`, `value`). |
-| `errors[]` | Operational errors, in requirement-name order. `kind` is a stable code; `message` is for humans. |
-| `…kind` | `unsupported_requirement` (no inspector supports it, or a `womm.yaml` section WOMM cannot verify), `inspection_failed` (WOMM could not inspect; nothing known about the target), `undecidable` (the comparison refused to decide; the requirement also appears with status `unknown`), `cancelled`, `other`. New kinds may be added. |
+| `errors[]` | Operational errors, in a fixed order: unsupported `services` entries (by name), the `environment` section, then per-requirement errors in requirement-name order. `kind` is a stable code; `message` is for humans. |
+| `…kind` | `unsupported_requirement` (no inspector supports it, or a `womm.yaml` section WOMM cannot verify), `inspection_failed` (WOMM could not inspect; nothing known about the target), `undecidable` (the comparison refused to decide; the requirement also appears with status `unknown`), `other`. (`cancelled` exists internally but never appears: an interrupted run prints no document.) New kinds may be added. |
 | `summary` | Counts per status; `total` equals the length of `requirements`. |
 
 A requirement that was observed absent but with a version (a
@@ -83,7 +83,13 @@ executed `path`, which is what the local user asked to see.
 ## Encoding
 
 UTF-8, indented by two spaces, one trailing newline. Control
-characters are escaped; `<`, `>` and `&` are not (constraints stay
-readable). Strings are valid UTF-8: bytes that are not are replaced by
-U+FFFD — the only lossy step, and only for input that was not text in
-the first place.
+characters (C0, DEL, the C1 controls such as CSI) and Unicode format
+characters (bidi overrides, zero-width and tag characters) are written
+as `\uXXXX` escapes, so the document is safe to `cat` to a terminal;
+`<`, `>` and `&` are not escaped (constraints stay readable). Strings
+are valid UTF-8: each byte that is not is replaced by one U+FFFD — the
+only lossy step, and only for input that was not text in the first
+place.
+
+`womm verify --help` (also with `--format json`) prints the help text on
+stdout and exits 0; no document is printed.
