@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -413,5 +414,31 @@ func TestVerifyShimSymlinkIntoProjectIsRefused(t *testing.T) {
 	}
 	if code != 3 || strings.Contains(stdout, "PASS") || !strings.Contains(stderr, "unsafe executable") {
 		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
+	}
+}
+
+// TestMain replaces accountHome so tests never see the host's home; this
+// pins that the PRODUCTION binding is the user-database lookup, not the
+// environment (a mutation to os.Getenv("HOME") otherwise goes unseen).
+var productionAccountHome = accountHome
+
+func TestProductionAccountHomeIsToolpathAccountHome(t *testing.T) {
+	if reflect.ValueOf(productionAccountHome).Pointer() != reflect.ValueOf(toolpath.AccountHome).Pointer() {
+		t.Fatal("accountHome is not bound to toolpath.AccountHome (the user database, never $HOME)")
+	}
+}
+
+// The project argument is a project root even when the verified file
+// lives somewhere else.
+func TestVerifyToolDirInsideTheProjectArgumentIsRefusedWhenFileIsElsewhere(t *testing.T) {
+	useInspector(t, stubInspector{obs: map[string]core.Observation{"node": {Name: "node", Present: true, Version: "24.7.0"}}})
+	project, elsewhere := realDir(t), realDir(t)
+	bin := filepath.Join(project, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := writeWomm(t, elsewhere, nodeReq)
+	if code, _, stderr := runCLI(t, "verify", project, "-f", file, "--tool-dir", bin); code != 2 || !strings.Contains(stderr, "inside the project") {
+		t.Errorf("exit %d, stderr %q; want a usage error for a directory inside the project argument", code, stderr)
 	}
 }
