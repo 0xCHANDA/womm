@@ -25,6 +25,12 @@ var newInspectors = func(r *toolpath.Resolver) []inspect.Inspector {
 	return []inspect.Inspector{nodeinspect.NewNodeInspectorWith(r)}
 }
 
+// accountHome returns the home directory the implicit version-manager
+// shim directories hang off: the account's, from the user database —
+// never the inherited $HOME, which a launcher can point into a project.
+// A variable so tests never depend on the host's real home.
+var accountHome = toolpath.AccountHome
+
 // exitCodeError carries an exit code for outcomes that are not
 // errors in the usual sense (a FAIL verdict, an inconclusive run). The
 // command has already written everything the user needs; cobra must
@@ -48,10 +54,13 @@ func newVerifyCmd() *cobra.Command {
 			"UNREACHABLE result, malformed configuration, or an operational " +
 			"failure) — 3 takes precedence over 1.\n\n" +
 			"Executables are resolved from --tool-dir directories (in the " +
-			"order given), then /usr/local/bin, /usr/bin and /bin — never from " +
-			"the inherited PATH. A directory inside the project, under a " +
+			"order given), then /usr/local/bin, /usr/bin and /bin, then the " +
+			"account's ~/.volta/bin, ~/.asdf/shims, ~/.local/share/mise/shims " +
+			"and ~/.local/bin when they exist and are safe — never from the " +
+			"inherited PATH. A --tool-dir inside the project, under a " +
 			"node_modules or world-writable is refused; one owned by another " +
-			"user is accepted with a warning.",
+			"user is accepted with a warning. An unsafe account directory " +
+			"is skipped with a warning.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := "."
@@ -71,6 +80,7 @@ func newVerifyCmd() *cobra.Command {
 				// verified) is project-controlled and never searched.
 				ProjectRoots: []string{root, filepath.Dir(file)},
 				ExplicitDirs: toolDirs,
+				UserHome:     accountHome(),
 			})
 			if err != nil {
 				var de *toolpath.DirError

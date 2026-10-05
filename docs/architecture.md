@@ -27,7 +27,7 @@ comparison is pure logic; reporting is presentation only.
 | `internal/detectors` | L0 | merged (PR 2) | `Detector` boundary: project filesystem reads only → `core.Requirement` |
 | `internal/detectors/node` | L0 | merged (PR 2) | `NodeDetector` (package.json `engines.node` + `.nvmrc`, conflict-safe) and `PackageManagerDetector` (`packageManager`, Corepack hash subset) |
 | `internal/inspect` | L1 | merged (PR 3, 8) | `Inspector` boundary: demand-driven machine observation → `core.Observation`; partial `Observation{Present: true}` next to a probe error |
-| `internal/inspect/toolpath` | L1 | integration/v0.2 | `Resolver`: ordered, validated search list (explicit `--tool-dir` directories, then the system allowlist) → absolute executable path; refuses project-controlled directories and symlinks into the project; never the inherited `PATH` |
+| `internal/inspect/toolpath` | L1 | integration/v0.2 | `Resolver`: ordered, validated search list (explicit `--tool-dir` directories, the system allowlist, then the account's version-manager shim directories) → absolute executable path; refuses project-controlled directories and symlinks into the project; never the inherited `PATH`; also owns `AccountHome()` (user database, never `$HOME`) |
 | `internal/inspect/node` | L1 | merged (PR 3) | `NodeInspector`: node/npm/pnpm/yarn `--version` probes with full L1 containment |
 | `internal/semverrange` | logic | merged (PR 10) | npm range grammar gate over Masterminds/semver: rejects `,`, `!=`, `=>`, `=<`, `~>`, empty sets, qualifiers on wildcards; normalizes whitespace |
 | `internal/compare` | logic | merged (PR 4) | pure `Compare(req, obs) → core.Match`; exact versions by equality, ranges for release versions only, prerelease-vs-range refused |
@@ -187,7 +187,12 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
 - Executables resolve only from an ordered, validated list
   (`internal/inspect/toolpath`): directories the invoking user named
   with `--tool-dir`, then the hardcoded allowlist (`/usr/local/bin`,
-  `/usr/bin`, `/bin`) — never the inherited `PATH`, never
+  `/usr/bin`, `/bin`), then the fixed shim directories under the
+  account's home (`~/.volta/bin`, `~/.asdf/shims`,
+  `~/.local/share/mise/shims`, `~/.local/bin`; home from the user
+  database, never `$HOME`; skipped with a warning unless owned by the
+  invoking user or root, not world-writable, outside the project) —
+  never the inherited `PATH`, never
   project-relative paths, never non-bare names. A user directory is
   refused when it is, or resolves into, the project (or the directory
   of the verified file), sits under `node_modules`, or is
@@ -197,6 +202,15 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
   `Observation.Path`.
 - Execution is direct (`exec.CommandContext`, absolute resolved path,
   fixed `--version` arg) — no shell, no npm scripts, no `npx`/corepack.
+- The probe environment is an **allowlist**: only locale settings
+  (`LANG`, `LANGUAGE`, `LC_*`) are inherited; everything else the probe
+  sees is forced (`PATH`, `HOME`, `COREPACK_*`, `YARN_IGNORE_PATH`,
+  `npm_config_manage_package_manager_versions`). Version-manager shims
+  are dispatchers steered by `VOLTA_HOME`, `MISE_*`, `ASDF_*`,
+  `XDG_DATA_HOME`... which a launcher can point into the project, so no
+  denylist can be complete. Cost: a tool that only starts with a custom
+  variable is reported `UNREACHABLE`. The stripped-variable notes below
+  remain true by construction.
 - `NODE_OPTIONS` is stripped from the probe environment (code-execution
   vector: `--require` runs arbitrary JS before `--version` prints);
   `PATH` inside the probe is replaced: the system allowlist, preceded

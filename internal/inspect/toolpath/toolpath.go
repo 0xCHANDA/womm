@@ -10,14 +10,20 @@
 //     direnv or `npm run` can prepend directories to it);
 //   - the search list is fixed, ordered and deterministic: directories
 //     the user typed explicitly (--tool-dir), in the order given, then
-//     the system directories (SystemDirs);
+//     the system directories (SystemDirs), then the well-known
+//     version-manager shim directories under the account's home
+//     (UserShimDirs);
 //   - a user-supplied directory must be absolute, must exist, and must
 //     not be (or sit under) a project root or a node_modules directory
 //     or be world-writable; anything else is refused with a
 //     deterministic diagnostic, never skipped silently. A directory
 //     owned by someone other than root or the invoking user is the
 //     user's call — Node installed by a build user and run as root is
-//     the common case — and is accepted with a warning;
+//     the common case — and is accepted with a warning. The implicit
+//     shim directories are held to a stricter rule, because nobody named
+//     them: they are skipped (with a warning) unless owned by the
+//     invoking user or root, and never when world-writable, inside the
+//     project or under node_modules;
 //   - a candidate that is a symlink resolving into a project root is
 //     refused (ErrUnsafe), never executed and never stepped over;
 //   - the executable that is started is the candidate's own path, not
@@ -35,6 +41,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unicode"
 )
 
 // ErrNotFound reports that no configured directory holds an executable
@@ -65,6 +72,9 @@ const (
 	OriginExplicit Origin = iota
 	// OriginSystem: a fixed system directory.
 	OriginSystem
+	// OriginUserShim: a well-known version-manager directory under the
+	// account's home (UserShimDirs); nobody typed it.
+	OriginUserShim
 )
 
 func (o Origin) String() string {
@@ -73,8 +83,24 @@ func (o Origin) String() string {
 		return "explicit"
 	case OriginSystem:
 		return "system"
+	case OriginUserShim:
+		return "user-shim"
 	}
 	return "unknown"
+}
+
+// UserShimDirs are the fixed, home-relative directories where version
+// managers keep launchers, in search order: Volta, asdf, mise and the
+// XDG user bin directory. They are consulted after the system
+// directories (nothing changes for a machine that already has a system
+// tool) and only when they pass the same checks as an explicit
+// directory plus an ownership check. nvm and fnm keep one directory per
+// installed version and no stable launcher: use --tool-dir for those.
+var UserShimDirs = []string{
+	".volta/bin",
+	".asdf/shims",
+	".local/share/mise/shims",
+	".local/bin",
 }
 
 // Dir is one entry of the resolved, ordered search list.
@@ -105,6 +131,10 @@ type Config struct {
 	ProjectRoots []string
 	// ExplicitDirs are the --tool-dir values, in the order given.
 	ExplicitDirs []string
+	// UserHome is the account's home directory, from the user database
+	// (AccountHome) — never the inherited $HOME. Empty (or relative)
+	// disables the implicit shim directories.
+	UserHome string
 }
 
 // Resolver maps tool names to executables using a validated, ordered
@@ -132,7 +162,7 @@ func build(cfg Config, euid int) (*Resolver, error) {
 
 	seen := map[string]bool{}
 	for _, raw := range cfg.ExplicitDirs {
-		real, warning, err := r.validateUserDir(raw, euid)
+		real, warning, err := r.vetDir(raw, euid, false)
 		if err != nil {
 			return nil, err
 		}
@@ -146,6 +176,35 @@ func build(cfg Config, euid int) (*Resolver, error) {
 		r.dirs = append(r.dirs, Dir{Path: real, Origin: OriginExplicit})
 	}
 	r.dirs = append(r.dirs, systemDirs()...)
+
+	if filepath.IsAbs(cfg.UserHome) {
+		home := filepath.Clean(cfg.UserHome)
+		for _, rel := range UserShimDirs {
+			lexical := filepath.Join(home, rel)
+			if _, err := os.Stat(lexical); errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+				continue // not installed: the normal case, nothing to say
+			}
+			real, _, err := r.vetDir(lexical, euid, true)
+			if err != nil {
+				var de *DirError
+				if errors.As(err, &de) {
+					r.warnings = append(r.warnings, fmt.Sprintf("tool directory %q skipped: %s", lexical, de.Reason))
+				}
+				continue
+			}
+			if _, err := os.Lstat(filepath.Join(real, ".womm-search-probe")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				// Nobody named this directory: one that cannot even be
+				// searched must not turn "no node" into an error.
+				r.warnings = append(r.warnings, fmt.Sprintf("tool directory %q skipped: cannot be searched: %s", lexical, reasonOf(err)))
+				continue
+			}
+			if seen[real] {
+				continue
+			}
+			seen[real] = true
+			r.dirs = append(r.dirs, Dir{Path: real, Origin: OriginUserShim})
+		}
+	}
 	return r, nil
 }
 
@@ -164,9 +223,12 @@ func (r *Resolver) Dirs() []Dir { return append([]Dir(nil), r.dirs...) }
 // noteworthy directories. They never change what is resolved.
 func (r *Resolver) Warnings() []string { return append([]string(nil), r.warnings...) }
 
-// validateUserDir returns the canonical form of an accepted user
-// directory, an optional warning, or a *DirError.
-func (r *Resolver) validateUserDir(raw string, euid int) (real, warning string, err error) {
+// vetDir returns the canonical form of an acceptable directory, an
+// optional warning, or a *DirError naming raw. strictOwner refuses a
+// directory owned by someone other than root or the invoking user (the
+// implicit shim directories); otherwise that is only a warning (a
+// directory the user typed).
+func (r *Resolver) vetDir(raw string, euid int, strictOwner bool) (real, warning string, err error) {
 	refuse := func(format string, a ...any) (string, string, error) {
 		return "", "", &DirError{Dir: raw, Reason: fmt.Sprintf(format, a...)}
 	}
@@ -174,21 +236,27 @@ func (r *Resolver) validateUserDir(raw string, euid int) (real, warning string, 
 		return refuse("must be an absolute path (the shell, not WOMM, expands ~ and relative paths)")
 	}
 	lexical := filepath.Clean(raw)
+	if !pathSafe(lexical) {
+		return refuse("contains a ':' or a control character and cannot be placed on a PATH safely")
+	}
 	if hasNodeModules(lexical) {
 		return refuse("is inside a node_modules directory, which is project territory")
 	}
 	if p, ok := r.insideProject(lexical); ok {
-		return refuse("is inside the project (%s); WOMM never executes anything the project controls", p)
+		return refuse("is inside the project (%q); WOMM never executes anything the project controls", p)
 	}
 	real, err = filepath.EvalSymlinks(lexical)
 	if err != nil {
 		return refuse("cannot be resolved: %s", reasonOf(err))
 	}
+	if !pathSafe(real) {
+		return refuse("resolves to %q, which contains a ':' or a control character and cannot be placed on a PATH safely", real)
+	}
 	if hasNodeModules(real) {
-		return refuse("resolves to %s, inside a node_modules directory", real)
+		return refuse("resolves to %q, inside a node_modules directory", real)
 	}
 	if p, ok := r.insideProject(real); ok {
-		return refuse("resolves to %s, inside the project (%s)", real, p)
+		return refuse("resolves to %q, inside the project (%q)", real, p)
 	}
 	fi, err := os.Stat(real)
 	if err != nil {
@@ -205,7 +273,10 @@ func (r *Resolver) validateUserDir(raw string, euid int) (real, warning string, 
 		return refuse("owner cannot be determined")
 	}
 	if uid != 0 && uid != uint32(euid) {
-		warning = fmt.Sprintf("tool directory %s is owned by uid %d, neither root nor the invoking user (uid %d); that user can replace the executables WOMM runs from it", real, uid, euid)
+		if strictOwner {
+			return refuse("is owned by uid %d, neither root nor the invoking user (uid %d)", uid, euid)
+		}
+		warning = fmt.Sprintf("tool directory %q is owned by uid %d, neither root nor the invoking user (uid %d); that user can replace the executables WOMM runs from it", real, uid, euid)
 	}
 	return real, warning, nil
 }
@@ -243,19 +314,26 @@ func (r *Resolver) usable(candidate string, origin Origin) (bool, error) {
 			// keeps the v0.1 "keep looking" behaviour).
 			return false, nil
 		}
-		return false, fmt.Errorf("%s: %s", candidate, reasonOf(err))
+		return false, fmt.Errorf("%q: %s", candidate, reasonOf(err))
 	}
 	if !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
-		// A directory, a FIFO or a file nobody may execute is not a
-		// usable binary: keep looking rather than fail here.
+		if origin != OriginSystem {
+			// The user (or their version manager) put something of this
+			// name here and it cannot run: a broken install. Stepping
+			// over it would answer for a different binary without a word.
+			return false, fmt.Errorf("%q exists but is not an executable regular file", candidate)
+		}
+		// System directories keep the v0.1 behaviour: a directory, a
+		// FIFO or a file nobody may execute is not a usable binary, keep
+		// looking.
 		return false, nil
 	}
 	real, err := filepath.EvalSymlinks(candidate)
 	if err != nil {
-		return false, fmt.Errorf("%s: %s", candidate, reasonOf(err))
+		return false, fmt.Errorf("%q: %s", candidate, reasonOf(err))
 	}
 	if p, ok := r.insideProject(real); ok {
-		return false, fmt.Errorf("%w: %s resolves to %s, inside the project (%s)", ErrUnsafe, candidate, real, p)
+		return false, fmt.Errorf("%w: %q resolves to %q, inside the project (%q)", ErrUnsafe, candidate, real, p)
 	}
 	return true, nil
 }
@@ -316,6 +394,18 @@ func within(path, root string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// pathSafe reports whether path can be placed on a PATH as one entry
+// and printed without driving a terminal: no ':' (the separator), no
+// NUL and no control characters.
+func pathSafe(path string) bool {
+	for _, r := range path {
+		if r == ':' || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func hasNodeModules(path string) bool {

@@ -16,6 +16,17 @@ non-goal.
 
 ## Environment variables: project-reachable vs user-owned
 
+**The probe's environment is an allowlist** (`LANG`, `LANGUAGE`, `LC_*`
+inherited; everything else forced). The per-variable rows below
+describe why each *specific* vector mattered; the allowlist is what
+makes the list of vectors unnecessary to keep complete. It was
+introduced when version-manager shims became executable: Volta, mise,
+asdf, nodenv and fnm launchers choose which binary to run from
+`VOLTA_HOME`, `MISE_*`, `ASDF_*`, `XDG_DATA_HOME`, ..., and a launcher
+that exports one of them pointing into the project would otherwise get
+project code executed behind a legitimate-looking `at <shim>` path
+(reproduced by a security review with the real Volta and mise).
+
 A project cannot set environment variables for the `womm` process
 directly. It can reach the environment only through a launcher the
 user chose to run it with:
@@ -78,16 +89,43 @@ environment variables the same way they can prepend to `PATH`.
 | a path through `node_modules` | usage error |
 | a symlink (or `..`) that lands inside the project | usage error, judged on the lexical *and* the canonical path |
 | world-writable directory | usage error: any local user could plant a binary |
+| a name containing `:` or a control character | usage error: `/x/a:/x/evil` would put `/x/evil` on the probe `PATH`; also keeps hostile names out of terminals (every path in a message is quoted) |
+| an entry named `node` that is not an executable regular file (mode 644, a directory, a FIFO) | operational error (exit 3), never a silent step to the next directory; system directories keep the v0.1 "keep looking" |
 | directory owned by another user | accepted, `warning:` on stderr (user's call) |
 | a binary there that is a symlink resolving into the project | operational error (exit 3); not run, not stepped over |
 | a dangling symlink in a user directory | operational error, never "absent" |
 | inherited `PATH` | never consulted |
+
+### The implicit shim directories
+
+`~/.volta/bin`, `~/.asdf/shims`, `~/.local/share/mise/shims` and
+`~/.local/bin` under the account's home are searched after the system
+directories. The home comes from the user database, never from `$HOME`
+(a launcher can point `$HOME` into the project: with a hostile `$HOME`
+the project's own `.volta/bin` is not searched). Nobody typed these
+directories, so the rules are stricter than for `--tool-dir`: a
+directory is used only when it is owned by the invoking user or root,
+not world-writable, and outside the project (and `node_modules`);
+anything else is skipped with a `warning:` on stderr. Running `womm`
+from the home directory itself makes every shim directory
+project-controlled, so all are skipped. Candidates are
+containment-checked like any other.
 
 The probe's own `PATH` gets the executable's directory first (see
 `docs/architecture.md`); that directory has passed the checks above.
 Residual risk: the user (or root) names a directory another user can
 replace binaries in; WOMM warns about foreign ownership and refuses
 world-writable directories but cannot judge every ancestor.
+
+Known limits of the project-root rule: a project root that is an
+ancestor of a system directory (`womm verify /`, or a `womm.yaml` in
+`/`) makes every system tool "inside the project", so the run is
+inconclusive (exit 3) — fail-closed, unlike v0.1 which verified it. A
+`womm.yaml` in `$HOME` likewise disables the account's shim directories
+(each skipped with a warning) and refuses `--tool-dir` under it. Only
+the leaf of a tool directory is checked for ownership and
+world-writability; group-writable directories and writable ancestors
+are accepted.
 
 ## What is out of scope
 

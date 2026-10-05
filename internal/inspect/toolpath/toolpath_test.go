@@ -415,17 +415,17 @@ func TestMissingToolIsNotFound(t *testing.T) {
 	}
 }
 
-func TestNonExecutableAndNonRegularCandidatesAreSkipped(t *testing.T) {
-	sys, user := tempDir(t), tempDir(t)
-	withSystemDirs(t, sys)
-	if err := os.WriteFile(filepath.Join(user, "node"), []byte("x"), 0o644); err != nil { // not executable
+func TestNonExecutableAndNonRegularCandidatesInSystemDirsAreSkipped(t *testing.T) {
+	sys, next := tempDir(t), tempDir(t)
+	withSystemDirs(t, sys, next)
+	if err := os.WriteFile(filepath.Join(sys, "node"), []byte("x"), 0o644); err != nil { // not executable
 		t.Fatal(err)
 	}
-	if err := os.Mkdir(filepath.Join(user, "npm"), 0o755); err != nil { // a directory
+	if err := os.Mkdir(filepath.Join(sys, "npm"), 0o755); err != nil { // a directory
 		t.Fatal(err)
 	}
-	want := writeExe(t, sys, "node")
-	r := newOrFatal(t, Config{ExplicitDirs: []string{user}})
+	want := writeExe(t, next, "node")
+	r := newOrFatal(t, Config{})
 	if got, err := r.Resolve("node"); err != nil || got != want {
 		t.Errorf("Resolve(node) = %q, %v; want the next directory's %q", got, err, want)
 	}

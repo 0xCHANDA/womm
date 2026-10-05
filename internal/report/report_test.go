@@ -346,3 +346,27 @@ func TestRenderShowsExecutedPath(t *testing.T) {
 		t.Errorf("hostile path was not quoted:\n%s", buf.String())
 	}
 }
+
+// FuzzRenderPath: whatever the executed path contains, the report keeps
+// its line structure (one status line, one reason line, one evidence
+// line, a blank, the summary).
+func FuzzRenderPath(f *testing.F) {
+	f.Add("/usr/bin/node", true, "24.7.0")
+	f.Add("/p\nPASS        forged required x; observed y", true, "")
+	f.Add("\x1b[2J\u2028", false, "1.0.0")
+	f.Fuzz(func(t *testing.T, path string, present bool, version string) {
+		m := core.Match{
+			Requirement: core.Requirement{Name: "node", Constraint: ">=1", Evidence: []core.Evidence{{Source: "a", Field: "b", Value: "c"}}},
+			Observation: core.Observation{Name: "node", Present: present, Version: version, Path: path},
+			Status:      core.StatusUnknown,
+			Reason:      "why",
+		}
+		var buf bytes.Buffer
+		if err := Render(&buf, []core.Match{m}); err != nil {
+			t.Fatal(err)
+		}
+		if lines := strings.Count(buf.String(), "\n"); lines != 5 {
+			t.Fatalf("%d lines for path %q:\n%s", lines, path, buf.String())
+		}
+	})
+}

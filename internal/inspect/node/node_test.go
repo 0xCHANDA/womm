@@ -233,8 +233,7 @@ func TestInspectNeverRunsFromProjectRoot(t *testing.T) {
 
 	dir := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "cwd.txt")
-	t.Setenv("WOMM_TEST_CWD_MARKER", marker)
-	path := writeFakeTool(t, dir, "npm", "pwd > \"$WOMM_TEST_CWD_MARKER\"\necho 1.2.3\n")
+	path := writeFakeTool(t, dir, "npm", "pwd > '"+marker+"'\necho 1.2.3\n")
 
 	// TMPDIR is what os.TempDir() would have used; a relative value
 	// would have pointed the probe into the project. Production must
@@ -403,19 +402,23 @@ func TestInspectStripsNodeOptions(t *testing.T) {
 }
 
 // TestSanitizedEnvStripsKeysWithoutPathCollision is a direct unit check
-// of sanitizedEnv: stripped keys are removed even when other variables
-// remain, and the sanitized PATH is always present.
+// of sanitizedEnv: inherited variables do not reach the probe (only
+// locale settings do), and the sanitized PATH is always present.
 func TestSanitizedEnvStripsKeysWithoutPathCollision(t *testing.T) {
 	t.Setenv("NODE_OPTIONS", "--require /evil.js")
-	t.Setenv("WOMM_TEST_INNOCENT", "keep-me")
+	t.Setenv("WOMM_TEST_INNOCENT", "dropped-too")
+	t.Setenv("LC_MESSAGES", "C")
 
 	env := sanitizedEnv()
 	joined := "\n" + strings.Join(env, "\n") + "\n"
 	if strings.Contains(joined, "NODE_OPTIONS=") {
 		t.Errorf("NODE_OPTIONS survived sanitization: %v", env)
 	}
-	if !strings.Contains(joined, "WOMM_TEST_INNOCENT=keep-me") {
-		t.Errorf("innocent variable was dropped: %v", env)
+	if strings.Contains(joined, "WOMM_TEST_INNOCENT=") {
+		t.Errorf("an inherited variable reached the probe (the environment is an allowlist): %v", env)
+	}
+	if !strings.Contains(joined, "\nLC_MESSAGES=C\n") {
+		t.Errorf("locale settings must be inherited: %v", env)
 	}
 	wantPath := "PATH=" + strings.Join(toolpath.SystemDirs, string(os.PathListSeparator))
 	found := false
@@ -942,26 +945,105 @@ func TestAccountHomeChild(t *testing.T) {
 	}
 }
 
-// TestAccountHomeForNeverFallsBackToTheEnvironment pins the contract at
-// unit level, where it runs everywhere (the subprocess test above needs
-// root and a cgo-less build): a failed lookup is "/nonexistent", whatever
-// HOME and USER say.
-func TestAccountHomeForNeverFallsBackToTheEnvironment(t *testing.T) {
-	t.Setenv("HOME", "/evil/project")
-	t.Setenv("USER", "ci")
-	cases := []struct {
-		name   string
-		lookup func(int) (string, bool)
-		want   string
-	}{
-		{"unknown uid", func(int) (string, bool) { return "", false }, "/nonexistent"},
-		{"relative passwd home", func(int) (string, bool) { return "evil/relative", true }, "/nonexistent"},
-		{"empty passwd home", func(int) (string, bool) { return "", true }, "/nonexistent"},
-		{"passwd home is cleaned", func(int) (string, bool) { return "/home/u/", true }, "/home/u"},
+// dispatcherShim writes a Volta/mise/asdf-shaped launcher: it does not
+// answer itself, it executes whichever binary an environment variable
+// names (VOLTA_HOME, MISE_*, ASDF_*, ... select the real tool).
+func dispatcherShim(t *testing.T, dir, name, envVar string) string {
+	t.Helper()
+	return writeFakeTool(t, dir, name, "exec \"$"+envVar+"/bin/"+name+"\" \"$@\"\n")
+}
+
+// TestInspectDoesNotLetTheEnvironmentSteerAShimDispatcher reproduces a
+// security review finding: version-manager shims choose the binary to
+// run from inherited variables, and a launcher (direnv, make, npm run)
+// can set those to a directory inside the project — project code
+// execution behind a legitimate-looking path, and a PASS.
+func TestInspectDoesNotLetTheEnvironmentSteerAShimDispatcher(t *testing.T) {
+	project := t.TempDir()
+	marker := filepath.Join(project, "pwned")
+	if err := os.MkdirAll(filepath.Join(project, "bin"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	for _, tc := range cases {
-		if got := accountHomeFor(tc.lookup, 1234); got != tc.want {
-			t.Errorf("%s: home = %q, want %q", tc.name, got, tc.want)
+	writeFakeTool(t, filepath.Join(project, "bin"), "node", "touch '"+marker+"'\necho v24.7.0\n")
+
+	shimDir := t.TempDir()
+	for _, v := range []string{"VOLTA_HOME", "MISE_DATA_DIR", "ASDF_DATA_DIR", "ASDF_NODEJS_VERSION", "NODENV_ROOT", "FNM_DIR", "N_PREFIX", "NVM_DIR", "RTX_DATA_DIR", "XDG_DATA_HOME", "SHELL", "BASH_ENV", "ENV", "IFS"} {
+		t.Run(v, func(t *testing.T) {
+			t.Setenv(v, project)
+			shim := dispatcherShim(t, shimDir, "node", v)
+			insp := newTestInspector(staticResolver(map[string]string{"node": shim}), t.TempDir())
+			obs, err := insp.Inspect(context.Background(), core.Requirement{Name: "node"})
+			if _, statErr := os.Stat(marker); statErr == nil {
+				t.Fatalf("%s=<project> steered the shim into running project code", v)
+			}
+			if err == nil && obs.Version == "24.7.0" {
+				t.Errorf("%s: the project's binary answered for the shim: %+v", v, obs)
+			}
+		})
+	}
+}
+
+// TestSanitizedEnvIsAnAllowlist pins the shape: nothing is inherited
+// except locale settings; everything else the probe sees is forced.
+func TestSanitizedEnvIsAnAllowlist(t *testing.T) {
+	for _, v := range []string{"VOLTA_HOME", "MISE_ANYTHING", "ASDF_DATA_DIR", "FOO", "TMPDIR", "SHELL", "npm_config_userconfig", "NODE_PATH", "BASH_ENV"} {
+		t.Setenv(v, "/evil")
+	}
+	t.Setenv("LANG", "en_US.UTF-8")
+	t.Setenv("LC_ALL", "C")
+	got := map[string]string{}
+	for _, kv := range sanitizedEnvFor("/home/u/.volta/bin/node") {
+		k, v, _ := strings.Cut(kv, "=")
+		got[k] = v
+	}
+	want := map[string]bool{"LANG": true, "LC_ALL": true, "PATH": true, "HOME": true, "COREPACK_HOME": true, "COREPACK_ENABLE_NETWORK": true,
+		"COREPACK_ENABLE_AUTO_PIN": true, "COREPACK_ENABLE_STRICT": true, "YARN_IGNORE_PATH": true, "npm_config_manage_package_manager_versions": true}
+	for k := range got {
+		if !want[k] {
+			t.Errorf("unexpected variable in the probe environment: %s=%s", k, got[k])
 		}
+	}
+	if got["LANG"] != "en_US.UTF-8" || got["LC_ALL"] != "C" {
+		t.Errorf("locale not preserved: %v", got)
+	}
+}
+
+// probePath must never emit a directory that would split into several
+// entries: only validated, separator-free directories may be prepended.
+func TestProbePathNeverSplitsADirectory(t *testing.T) {
+	sys := strings.Join(toolpath.SystemDirs, string(os.PathListSeparator))
+	for _, exec := range []string{"/x/a:/x/evil/npm", "/x/a:/node", "/x/nl\n/node"} {
+		if got := probePath(exec); got != sys {
+			t.Errorf("probePath(%q) = %q, want the system PATH only", exec, got)
+		}
+	}
+}
+
+// TestAccountHomeIgnoresHostileHomeAtInit re-runs the test binary as the
+// SAME uid with a hostile HOME and USER and checks the package's
+// account home and probe environment. Unlike the passwd-less-uid test it
+// needs no root, so CI exercises it: a production binding to
+// os.Getenv("HOME") is caught here.
+func TestAccountHomeIgnoresHostileHomeAtInit(t *testing.T) {
+	if os.Getenv("WOMM_HOSTILE_HOME_CHILD") == "1" {
+		if strings.HasPrefix(accountHome, "/evil") {
+			t.Fatalf("accountHome = %q: the inherited HOME was used", accountHome)
+		}
+		for _, kv := range sanitizedEnvFor("/usr/bin/node") {
+			if strings.Contains(kv, "/evil/project") {
+				t.Errorf("hostile value reached the probe environment: %s", kv)
+			}
+		}
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^TestAccountHomeIgnoresHostileHomeAtInit$", "-test.v")
+	cmd.Env = []string{"WOMM_HOSTILE_HOME_CHILD=1", "HOME=/evil/project", "USER=ci", "PATH=" + os.Getenv("PATH")}
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "--- PASS: TestAccountHomeIgnoresHostileHomeAtInit") {
+		t.Fatalf("child: %v\n%s", err, out)
 	}
 }

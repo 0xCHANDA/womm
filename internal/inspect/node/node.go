@@ -258,32 +258,35 @@ func (n *NodeInspector) probe(ctx context.Context, path string) (string, error) 
 // filtered out regardless of who set it.
 func sanitizedEnv() []string { return sanitizedEnvFor("") }
 
-// sanitizedEnvFor is sanitizedEnv for a probe of execPath. A binary
-// from a user-named directory may be a launcher that finds its sibling
-// tools through PATH — npm and pnpm from nvm, fnm or Volta are
-// `#!/usr/bin/env node` scripts — and with the system directories
-// alone they would silently run on the system node (or fail to start).
-// So that directory, already validated by the resolver, goes first.
-// System binaries keep exactly the fixed system PATH.
+// sanitizedEnvFor is sanitizedEnv for a probe of execPath: an ALLOWLIST.
+// The probe inherits only locale settings; every other variable it sees
+// is forced below. A denylist cannot work here: version-manager shims
+// (Volta, mise, asdf, nodenv, fnm, ...) are dispatchers that pick the
+// binary to run from VOLTA_HOME, MISE_*, ASDF_*, XDG_DATA_HOME and the
+// like, any of which a launcher (direnv, make, `npm run`) can point into
+// the project — project code execution behind a legitimate-looking
+// path, and a PASS. The same holds for every future tool whose
+// configuration lives in the environment. The cost is stated: a tool
+// that only starts with a custom variable (Nix-style wrappers) is
+// reported UNREACHABLE, honestly.
+//
+// A binary from a user-named directory may be a launcher that finds its
+// sibling tools through PATH — npm and pnpm from nvm, fnm or Volta are
+// `#!/usr/bin/env node` scripts — and with the system directories alone
+// they would silently run on the system node (or fail to start). So
+// that directory, already validated by the resolver, goes first. System
+// binaries keep exactly the fixed system PATH.
 func sanitizedEnvFor(execPath string) []string {
 	env := os.Environ()
-	stripped := strippedEnvKeys
-	filtered := make([]string, 0, len(env)+len(forcedEnv)+1)
+	out := make([]string, 0, len(forcedEnv)+4)
 	for _, kv := range env {
-		hostile := false
-		for _, key := range stripped {
-			if strings.HasPrefix(kv, key+"=") {
-				hostile = true
-				break
-			}
+		key, _, _ := strings.Cut(kv, "=")
+		if key == "LANG" || key == "LANGUAGE" || strings.HasPrefix(key, "LC_") {
+			out = append(out, kv)
 		}
-		if hostile {
-			continue
-		}
-		filtered = append(filtered, kv)
 	}
-	filtered = append(filtered, forcedEnv...)
-	return append(filtered, "PATH="+probePath(execPath))
+	out = append(out, forcedEnv...)
+	return append(out, "PATH="+probePath(execPath))
 }
 
 // probePath is the PATH of a probe: the executable's own directory when
@@ -292,6 +295,11 @@ func probePath(execPath string) string {
 	dirs := append([]string(nil), toolpath.SystemDirs...)
 	if execPath != "" {
 		dir := filepath.Dir(execPath)
+		if strings.ContainsAny(dir, ":\x00\n\r") {
+			// Never emit an entry that would split into several: the
+			// resolver refuses such directories, this is the backstop.
+			return strings.Join(dirs, string(os.PathListSeparator))
+		}
 		system := false
 		for _, d := range dirs {
 			if d == dir {
@@ -306,52 +314,8 @@ func probePath(execPath string) string {
 	return strings.Join(dirs, string(os.PathListSeparator))
 }
 
-// strippedEnvKeys are the environment variables removed from every
-// probe's environment. PATH is replaced (not just dropped) with the
-// probe PATH (see probePath); the rest are simply removed.
-var strippedEnvKeys = []string{
-	"NODE_OPTIONS", // node-only: can inject --require/-e code execution
-	"PATH",         // replaced by probePath
-	// Dynamic-loader injection: a preloaded or audit library runs
-	// before main() of every dynamically linked probe (node is).
-	// LD_LIBRARY_PATH can substitute libc itself. Same class as
-	// NODE_OPTIONS: inherited, project-reachable through launchers,
-	// never needed to print a version.
-	"LD_PRELOAD",
-	"LD_AUDIT",
-	"LD_LIBRARY_PATH",
-	// Make node write files during --version (coverage dumps,
-	// redirected warnings): a probe must not mutate the machine.
-	"NODE_V8_COVERAGE",
-	"NODE_REDIRECT_WARNINGS",
-	// Where Corepack shims and package managers look for caches and
-	// user config. A Corepack shim executes whatever pnpm.cjs sits in
-	// $COREPACK_HOME (default $HOME/.cache/node/corepack) with no
-	// integrity check, so an inherited COREPACK_HOME, HOME or
-	// XDG_CACHE_HOME pointing into a project is code execution.
-	// Replaced by forcedEnv with the account's real home.
-	"COREPACK_HOME",
-	"HOME",
-	"XDG_CACHE_HOME",
-	"XDG_CONFIG_HOME",
-	// Corepack reads these to decide whether it may download a package
-	// manager; they are replaced by forcedEnv so the answer is always
-	// "no".
-	"COREPACK_ENABLE_NETWORK",
-	"COREPACK_ENABLE_AUTO_PIN",
-	"COREPACK_ENABLE_STRICT",
-	// yarn 1 gates .yarnrc `yarn-path` (arbitrary JS run before any
-	// command) on this; pnpm gates its self-version-management
-	// (download + run of the packageManager pinned by an ancestor
-	// package.json) on the other. Both replaced by forcedEnv.
-	"YARN_IGNORE_PATH",
-	"npm_config_manage_package_manager_versions",
-	"NPM_CONFIG_MANAGE_PACKAGE_MANAGER_VERSIONS",
-}
-
-// forcedEnv are the variables every probe gets with fixed values,
-// after strippedEnvKeys removed any inherited copy (PATH is set per
-// probe, see probePath).
+// forcedEnv are the variables every probe gets with fixed values (PATH
+// is set per probe, see probePath).
 //
 // On many machines /usr/local/bin/pnpm and /usr/local/bin/yarn are
 // Corepack shims: "pnpm --version" may download pnpm from the network
@@ -379,21 +343,17 @@ var forcedEnv = []string{
 }
 
 // accountHome is the home directory of the account WOMM runs as,
-// taken from the user database (see lookupHome) — never from the
-// inherited $HOME, which a launcher can point into a project. Corepack shims resolve their cache from it and package
+// taken from the user database (see toolpath.AccountHome) — never from
+// the inherited $HOME, which a launcher can point into a project. Corepack shims resolve their cache from it and package
 // managers read their user config from it; both must be the user's
 // own. When the account has no home directory a non-existent path is
 // used: cached shims then fail fast and are reported as unreachable
 // rather than run from an attacker-chosen directory.
 var accountHome = resolveAccountHome()
 
-func resolveAccountHome() string { return accountHomeFor(lookupHome, os.Getuid()) }
-
-// accountHomeFor returns the absolute home directory lookup reports
-// for uid, or "/nonexistent". It must never consult the environment.
-func accountHomeFor(lookup func(uid int) (string, bool), uid int) string {
-	if home, ok := lookup(uid); ok && filepath.IsAbs(home) {
-		return filepath.Clean(home)
+func resolveAccountHome() string {
+	if home := toolpath.AccountHome(); home != "" {
+		return home
 	}
 	return "/nonexistent"
 }
