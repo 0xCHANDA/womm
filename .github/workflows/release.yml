@@ -6,7 +6,8 @@
 # static Linux binaries for amd64 and arm64 with the version injected
 # from the tag, writes SHA-256 checksums, and attaches everything to a
 # GitHub Release for that tag. Builds are reproducible for a given Go
-# toolchain: -trimpath, CGO disabled, fixed ldflags, GOTOOLCHAIN=local
+# toolchain: -trimpath, CGO disabled (build step only: -race needs cgo),
+# fixed ldflags, GOTOOLCHAIN=local
 # on the pinned Go line (setup-go resolves the newest 1.24.x patch; the
 # exact toolchain is printed in the job log).
 name: release
@@ -23,7 +24,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOTOOLCHAIN: local
-      CGO_ENABLED: "0"
     strategy:
       matrix:
         goarch: [amd64, arm64]
@@ -43,10 +43,15 @@ jobs:
           diff go.mod go.mod.bak && diff go.sum go.sum.bak && rm -f go.mod.bak go.sum.bak
           go vet ./...
           go test -count=1 ./...
+          # -race needs cgo, so it runs in the default (cgo) configuration;
+          # the release itself is built with CGO_ENABLED=0 (build step), so
+          # that configuration is tested as well.
           go test -race ./...
+          CGO_ENABLED=0 go test -count=1 ./...
 
       - name: build
         env:
+          CGO_ENABLED: "0"
           GOOS: linux
           GOARCH: ${{ matrix.goarch }}
         run: |
