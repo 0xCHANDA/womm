@@ -201,7 +201,9 @@ interrupted run) stdout stays empty — check the exit code first.
 - Fixed `--version` argument, no shell, working directory `/` (never
   the project root, no writable ancestors for yarn/pnpm to walk up
   into).
-- `NODE_OPTIONS` stripped; Corepack forced offline and passive; yarn
+- The probe inherits only locale variables (version-manager shims are
+  steered by `VOLTA_HOME`, `MISE_*`, ... — never trusted from the
+  environment); `NODE_OPTIONS` stripped; Corepack forced offline and passive; yarn
   `yarn-path` ignored; pnpm self-version-management disabled: a probe
   cannot download anything, run project-chosen code or edit a
   `package.json`.

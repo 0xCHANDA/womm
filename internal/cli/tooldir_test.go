@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -278,7 +279,7 @@ func TestVerifyToolDirOwnedByAnotherUserWarnsButWorks(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout, "observed 24.7.0 at "+tool+"\n") {
 		t.Fatalf("exit %d\nstdout %s\nstderr %s", code, stdout, stderr)
 	}
-	if want := "warning: tool directory " + user + " is owned by uid 12345"; !strings.Contains(stderr, want) {
+	if want := "warning: tool directory " + strconv.Quote(user) + " is owned by uid 12345"; !strings.Contains(stderr, want) {
 		t.Errorf("stderr lacks %q:\n%s", want, stderr)
 	}
 }
@@ -345,7 +346,7 @@ func TestVerifySkipsUnsafeShimDirsWithAWarningAndStillDecides(t *testing.T) {
 	if code != 1 || !strings.Contains(stdout, "FAIL        node required >=22 <25; observed absent\n") {
 		t.Fatalf("exit %d\n%s", code, stdout)
 	}
-	if want := "warning: tool directory " + bad + " skipped: is world-writable"; !strings.Contains(stderr, want) {
+	if want := "warning: tool directory " + strconv.Quote(bad) + " skipped: is world-writable"; !strings.Contains(stderr, want) {
 		t.Errorf("stderr lacks %q:\n%s", want, stderr)
 	}
 }

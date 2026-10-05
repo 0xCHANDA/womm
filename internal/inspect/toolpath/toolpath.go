@@ -41,6 +41,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unicode"
 )
 
 // ErrNotFound reports that no configured directory holds an executable
@@ -187,8 +188,14 @@ func build(cfg Config, euid int) (*Resolver, error) {
 			if err != nil {
 				var de *DirError
 				if errors.As(err, &de) {
-					r.warnings = append(r.warnings, fmt.Sprintf("tool directory %s skipped: %s", lexical, de.Reason))
+					r.warnings = append(r.warnings, fmt.Sprintf("tool directory %q skipped: %s", lexical, de.Reason))
 				}
+				continue
+			}
+			if _, err := os.Lstat(filepath.Join(real, ".womm-search-probe")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				// Nobody named this directory: one that cannot even be
+				// searched must not turn "no node" into an error.
+				r.warnings = append(r.warnings, fmt.Sprintf("tool directory %q skipped: cannot be searched: %s", lexical, reasonOf(err)))
 				continue
 			}
 			if seen[real] {
@@ -229,21 +236,27 @@ func (r *Resolver) vetDir(raw string, euid int, strictOwner bool) (real, warning
 		return refuse("must be an absolute path (the shell, not WOMM, expands ~ and relative paths)")
 	}
 	lexical := filepath.Clean(raw)
+	if !pathSafe(lexical) {
+		return refuse("contains a ':' or a control character and cannot be placed on a PATH safely")
+	}
 	if hasNodeModules(lexical) {
 		return refuse("is inside a node_modules directory, which is project territory")
 	}
 	if p, ok := r.insideProject(lexical); ok {
-		return refuse("is inside the project (%s); WOMM never executes anything the project controls", p)
+		return refuse("is inside the project (%q); WOMM never executes anything the project controls", p)
 	}
 	real, err = filepath.EvalSymlinks(lexical)
 	if err != nil {
 		return refuse("cannot be resolved: %s", reasonOf(err))
 	}
+	if !pathSafe(real) {
+		return refuse("resolves to %q, which contains a ':' or a control character and cannot be placed on a PATH safely", real)
+	}
 	if hasNodeModules(real) {
-		return refuse("resolves to %s, inside a node_modules directory", real)
+		return refuse("resolves to %q, inside a node_modules directory", real)
 	}
 	if p, ok := r.insideProject(real); ok {
-		return refuse("resolves to %s, inside the project (%s)", real, p)
+		return refuse("resolves to %q, inside the project (%q)", real, p)
 	}
 	fi, err := os.Stat(real)
 	if err != nil {
@@ -263,7 +276,7 @@ func (r *Resolver) vetDir(raw string, euid int, strictOwner bool) (real, warning
 		if strictOwner {
 			return refuse("is owned by uid %d, neither root nor the invoking user (uid %d)", uid, euid)
 		}
-		warning = fmt.Sprintf("tool directory %s is owned by uid %d, neither root nor the invoking user (uid %d); that user can replace the executables WOMM runs from it", real, uid, euid)
+		warning = fmt.Sprintf("tool directory %q is owned by uid %d, neither root nor the invoking user (uid %d); that user can replace the executables WOMM runs from it", real, uid, euid)
 	}
 	return real, warning, nil
 }
@@ -301,19 +314,26 @@ func (r *Resolver) usable(candidate string, origin Origin) (bool, error) {
 			// keeps the v0.1 "keep looking" behaviour).
 			return false, nil
 		}
-		return false, fmt.Errorf("%s: %s", candidate, reasonOf(err))
+		return false, fmt.Errorf("%q: %s", candidate, reasonOf(err))
 	}
 	if !info.Mode().IsRegular() || info.Mode()&0o111 == 0 {
-		// A directory, a FIFO or a file nobody may execute is not a
-		// usable binary: keep looking rather than fail here.
+		if origin != OriginSystem {
+			// The user (or their version manager) put something of this
+			// name here and it cannot run: a broken install. Stepping
+			// over it would answer for a different binary without a word.
+			return false, fmt.Errorf("%q exists but is not an executable regular file", candidate)
+		}
+		// System directories keep the v0.1 behaviour: a directory, a
+		// FIFO or a file nobody may execute is not a usable binary, keep
+		// looking.
 		return false, nil
 	}
 	real, err := filepath.EvalSymlinks(candidate)
 	if err != nil {
-		return false, fmt.Errorf("%s: %s", candidate, reasonOf(err))
+		return false, fmt.Errorf("%q: %s", candidate, reasonOf(err))
 	}
 	if p, ok := r.insideProject(real); ok {
-		return false, fmt.Errorf("%w: %s resolves to %s, inside the project (%s)", ErrUnsafe, candidate, real, p)
+		return false, fmt.Errorf("%w: %q resolves to %q, inside the project (%q)", ErrUnsafe, candidate, real, p)
 	}
 	return true, nil
 }
@@ -374,6 +394,18 @@ func within(path, root string) bool {
 		return false
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// pathSafe reports whether path can be placed on a PATH as one entry
+// and printed without driving a terminal: no ':' (the separator), no
+// NUL and no control characters.
+func pathSafe(path string) bool {
+	for _, r := range path {
+		if r == ':' || unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func hasNodeModules(path string) bool {

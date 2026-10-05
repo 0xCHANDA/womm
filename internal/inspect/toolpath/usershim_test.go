@@ -288,3 +288,141 @@ func TestVoltaAsdfMiseShapedShimsEndToEnd(t *testing.T) {
 		t.Fatalf("Resolve = %q, %v; want the mise shim itself, not its target", p, err)
 	}
 }
+
+// --- findings of the independent reviews of this slice ----------------
+
+// A ':' in a directory name splits the probe PATH: "/x/a:/x/evil" puts
+// /x/evil on it, a directory nobody vetted.
+func TestDirsContainingPathSeparatorsOrControlCharactersAreRefused(t *testing.T) {
+	sys, base := tempDir(t), tempDir(t)
+	withSystemDirs(t, sys)
+	for _, name := range []string{"a:b", "a:", ":a", "tab\there", "nl\nx", "esc\x1b[2J"} {
+		d := filepath.Join(base, name)
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_, err := New(Config{ExplicitDirs: []string{d}})
+		var de *DirError
+		if !errors.As(err, &de) || !strings.Contains(de.Reason, "PATH") {
+			t.Errorf("%q: error = %v, want a refusal explaining it cannot go on a PATH", name, err)
+		}
+		// The same name as the account home disables the shim directories with a warning.
+		home := filepath.Join(base, "home-"+name)
+		if err := os.MkdirAll(filepath.Join(home, ".volta", "bin"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		r := newOrFatal(t, Config{UserHome: home})
+		if len(r.Dirs()) != 1 || len(r.Warnings()) != 1 {
+			t.Errorf("home %q: Dirs %+v Warnings %q; want the shim dir skipped with a warning", name, r.Dirs(), r.Warnings())
+		}
+	}
+}
+
+// A user directory that has an entry of the right name which cannot be
+// run is a broken install. Stepping over it would answer for a
+// different binary (the system's) without a word.
+func TestUnusableCandidateInAUserDirIsAnErrorNotAFallThrough(t *testing.T) {
+	sys := tempDir(t)
+	withSystemDirs(t, sys)
+	writeExe(t, sys, "node")
+	for name, make := range map[string]func(p string) error{
+		"not executable": func(p string) error { return os.WriteFile(p, []byte("x"), 0o644) },
+		"directory":      func(p string) error { return os.Mkdir(p, 0o755) },
+		"fifo":           func(p string) error { return mkfifo(p) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			user := tempDir(t)
+			if err := make(filepath.Join(user, "node")); err != nil {
+				t.Fatal(err)
+			}
+			r := newOrFatal(t, Config{ExplicitDirs: []string{user}})
+			got, err := r.Resolve("node")
+			if err == nil || errors.Is(err, ErrNotFound) {
+				t.Fatalf("Resolve = %q, %v; want an operational error, not a silent step to the system node", got, err)
+			}
+			// The same entry in an implicit shim directory, with no system
+			// node in the way (the system directories are searched first).
+			withSystemDirs(t, tempDir(t))
+			home, _ := shimHome(t)
+			if err := os.MkdirAll(filepath.Join(home, ".volta", "bin"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := make(filepath.Join(home, ".volta", "bin", "node")); err != nil {
+				t.Fatal(err)
+			}
+			r = newOrFatal(t, Config{UserHome: home})
+			if got, err := r.Resolve("node"); err == nil || errors.Is(err, ErrNotFound) {
+				t.Fatalf("shim dir: Resolve = %q, %v; want an operational error", got, err)
+			}
+			withSystemDirs(t, sys)
+		})
+	}
+	// System directories keep the v0.1 behaviour: keep looking.
+	r := newOrFatal(t, Config{})
+	if err := os.Remove(filepath.Join(sys, "node")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sys, "node"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Resolve("node"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("system dir: error = %v, want ErrNotFound (unchanged v0.1 behaviour)", err)
+	}
+}
+
+// An implicit directory nobody named that cannot even be searched is
+// skipped with a warning; it must not turn "no node" (a FAIL) into an
+// operational error.
+func TestUnsearchableShimDirIsSkippedWithAWarning(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can search any directory")
+	}
+	withSystemDirs(t, tempDir(t))
+	home, dirs := shimHome(t, ".volta/bin")
+	if err := os.Chmod(dirs[0], 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dirs[0], 0o755) })
+	r := newOrFatal(t, Config{UserHome: home})
+	if w := r.Warnings(); len(w) != 1 || !strings.Contains(w[0], "cannot be searched") {
+		t.Fatalf("Warnings = %q", w)
+	}
+	if _, err := r.Resolve("node"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("error = %v, want ErrNotFound", err)
+	}
+}
+
+// Messages carry user-chosen path text: it must be quoted so a hostile
+// directory name cannot forge a line or drive the terminal.
+func TestMessagesQuoteHostilePaths(t *testing.T) {
+	withSystemDirs(t, tempDir(t))
+	base := tempDir(t)
+	hostile := filepath.Join(base, "evil\x1b[2J\nerror: forged")
+	if err := os.MkdirAll(hostile, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(hostile, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(base, "h\x1b[2J\nwarning: forged")
+	if err := os.MkdirAll(filepath.Join(home, ".volta", "bin"), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(home, ".volta", "bin"), 0o777); err != nil {
+		t.Fatal(err)
+	}
+	_, err := New(Config{ExplicitDirs: []string{hostile}})
+	r := newOrFatal(t, Config{UserHome: home})
+	msgs := append([]string{}, r.Warnings()...)
+	if err != nil {
+		msgs = append(msgs, err.Error())
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %q, want the refusal and one warning", msgs)
+	}
+	for _, m := range msgs {
+		if strings.ContainsAny(m, "\x1b\n\r") {
+			t.Errorf("a hostile path reached a message raw: %q", m)
+		}
+	}
+}
