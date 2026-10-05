@@ -56,5 +56,12 @@ jobs:
       - name: go test (race)
         run: go test -race ./...
 
+      # The release binaries are built with CGO_ENABLED=0, and os/user
+      # behaves differently without cgo (it falls back to $HOME for a uid
+      # with no passwd entry). The default run above is a cgo build; this
+      # one tests what is actually shipped.
+      - name: go test (release configuration, CGO_ENABLED=0)
+        run: CGO_ENABLED=0 go test -count=1 ./...
+
       - name: go build
         run: go build ./cmd/womm
