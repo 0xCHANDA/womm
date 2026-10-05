@@ -23,6 +23,16 @@ candidate content for the first tag, to be cut by a human.
   another user is accepted with a `warning:`. A binary that is a symlink
   into the project is refused (exit 3), never run and never stepped
   over. New package `internal/inspect/toolpath` owns resolution.
+- Go ecosystem (second ecosystem; proves the architecture generalizes):
+  `capture` reads the `go` directive of `go.mod` into `go: >=V`
+  (`toolchain` is a suggestion for GOTOOLCHAIN=auto and is ignored); `verify`
+  probes `go version` (GOTOOLCHAIN=local, GOENV=off, telemetry redirected)
+  and compares in Go's order via `go/version` — `1.21 < 1.21rc1 <
+  1.21.0`, not semver. A development build or vendor-suffixed version is
+  unknown. Shared infrastructure extracted from the Node code:
+  `internal/inspect/probe` (process containment, environment allowlist),
+  `internal/detectors/source` (contained L0 read). Differential tests
+  against the real go command (go.mod reading; accept/reject of `go X`).
 - `womm verify --format json`: one deterministic JSON document on stdout
   (schema version 1, explicit public DTO, documented in
   `docs/output-json.md`) with requirements, status, reason, observation

@@ -21,6 +21,7 @@ import (
 
 	"github.com/0xCHANDA/womm/internal/core"
 	"github.com/0xCHANDA/womm/internal/detectors"
+	"github.com/0xCHANDA/womm/internal/detectors/gomod"
 	"github.com/0xCHANDA/womm/internal/detectors/node"
 	"github.com/0xCHANDA/womm/internal/schema"
 )
@@ -43,13 +44,14 @@ var (
 // FileName is the default output file name inside a project.
 const FileName = "womm.yaml"
 
-// defaultDetectors is the fixed detector set of the v0.1 vertical
-// slice (Node.js ecosystem). Order does not affect the output:
+// defaultDetectors is the fixed detector set: Node.js (package.json,
+// .nvmrc) and Go (go.mod). Order does not affect the output:
 // requirements are sorted by name.
 func defaultDetectors() []detectors.Detector {
 	return []detectors.Detector{
 		node.NewNodeDetector(),
 		node.NewPackageManagerDetector(),
+		gomod.New(),
 	}
 }
 

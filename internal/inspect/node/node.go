@@ -24,8 +24,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -212,43 +210,10 @@ func sanitizedEnv() []string { return sanitizedEnvFor("") }
 // they would silently run on the system node (or fail to start). So
 // that directory, already validated by the resolver, goes first. System
 // binaries keep exactly the fixed system PATH.
-func sanitizedEnvFor(execPath string) []string {
-	env := os.Environ()
-	out := make([]string, 0, len(forcedEnv)+4)
-	for _, kv := range env {
-		key, _, _ := strings.Cut(kv, "=")
-		if key == "LANG" || key == "LANGUAGE" || strings.HasPrefix(key, "LC_") {
-			out = append(out, kv)
-		}
-	}
-	out = append(out, forcedEnv...)
-	return append(out, "PATH="+probePath(execPath))
-}
+func sanitizedEnvFor(execPath string) []string { return probe.Env(execPath, forcedEnv) }
 
-// probePath is the PATH of a probe: the executable's own directory when
-// it is not a system directory, then the system directories.
-func probePath(execPath string) string {
-	dirs := append([]string(nil), toolpath.SystemDirs...)
-	if execPath != "" {
-		dir := filepath.Dir(execPath)
-		if strings.ContainsAny(dir, ":\x00\n\r") {
-			// Never emit an entry that would split into several: the
-			// resolver refuses such directories, this is the backstop.
-			return strings.Join(dirs, string(os.PathListSeparator))
-		}
-		system := false
-		for _, d := range dirs {
-			if d == dir {
-				system = true
-				break
-			}
-		}
-		if !system {
-			dirs = append([]string{dir}, dirs...)
-		}
-	}
-	return strings.Join(dirs, string(os.PathListSeparator))
-}
+// probePath is the PATH of a probe; see probe.PathFor.
+func probePath(execPath string) string { return probe.PathFor(execPath) }
 
 // forcedEnv are the variables every probe gets with fixed values (PATH
 // is set per probe, see probePath).
@@ -287,12 +252,7 @@ var forcedEnv = []string{
 // rather than run from an attacker-chosen directory.
 var accountHome = resolveAccountHome()
 
-func resolveAccountHome() string {
-	if home := toolpath.AccountHome(); home != "" {
-		return home
-	}
-	return "/nonexistent"
-}
+func resolveAccountHome() string { return probe.AccountHome() }
 
 // parseVersion extracts a version from a tool's raw probe output, or
 // reports it as unknown ("") when the output cannot be trusted as a

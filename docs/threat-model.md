@@ -127,6 +127,26 @@ the leaf of a tool directory is checked for ownership and
 world-writability; group-writable directories and writable ancestors
 are accepted.
 
+## Go (`go version`)
+
+The Go inspector runs through the same resolver, probe runner and
+allowlisted environment as Node. Additionally: `GOTOOLCHAIN=local`
+(a module's `go`/`toolchain` lines can never make the go command download
+and run another toolchain), `GOENV=off` (the user's `go env` file is not
+read), no inherited `GOFLAGS`/`GOROOT`/`GOPATH`/`GOTOOLCHAIN`, cwd `/`
+(no `go.mod`/`go.work` to walk up to). Telemetry: since Go 1.23 the go
+command writes counter files under `$HOME/.config/go/telemetry` even for
+`go version`, and with telemetry mode `on` may start an upload process;
+the probe sets `TEST_TELEMETRY_DIR` to a path below `/dev/null` (not
+creatable even by root). That hook is internal to the go command, so a
+test runs the real go command and fails if the probe changes the home
+directory — a future Go that ignores the hook is caught in CI, not in the
+field. `go.mod` is read by the shared contained reader and parsed
+statically; the `toolchain` line is ignored. WOMM does not validate the
+rest of `go.mod`: a file the go command rejects for another reason still
+yields its `go` directive; one it rejects *about* the `go` directive is
+an error here too (differential-tested).
+
 ## What is out of scope
 
 - A hostile **root** or a compromised system directory: WOMM
