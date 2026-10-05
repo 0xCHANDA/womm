@@ -31,7 +31,11 @@ candidate content for the first tag, to be cut by a human.
   1.21.0`, not semver. A development build or vendor-suffixed version is
   unknown. Shared infrastructure extracted from the Node code:
   `internal/inspect/probe` (process containment, environment allowlist),
-  `internal/detectors/source` (contained L0 read). Differential tests
+  `internal/detectors/source` (contained L0 read; `go.mod` has a 1 MiB cap
+  of its own). The `go.mod` reader follows the go command's tokenization;
+  an independent review found punctuation cases where it disagreed (a file
+  the go command reads as `go 1.99` became zero requirements) — fixed, with
+  a second differential over byte-mutated real `go.mod` files. Differential tests
   against the real go command (go.mod reading; accept/reject of `go X`).
 - `womm verify --format json`: one deterministic JSON document on stdout
   (schema version 1, explicit public DTO, documented in

@@ -28,6 +28,11 @@ import (
 	"github.com/0xCHANDA/womm/internal/goversion"
 )
 
+// maxGoModBytes bounds go.mod. A real one is a few KB (the Go distribution's
+// own is under 10 KB); the generic 16 MiB source cap let a hostile file be
+// lexed into ~1.9 GB of tokens. A larger go.mod is an explicit error.
+const maxGoModBytes = 1 << 20
+
 // ErrMalformed marks a go.mod whose go directive cannot be read
 // unambiguously (repeated, in a block, wrong arity, invalid version) or
 // whose syntax this reader refuses to guess about.
@@ -44,7 +49,7 @@ func (Detector) Name() string { return "go" }
 
 // Detect implements detectors.Detector.
 func (Detector) Detect(_ context.Context, projectRoot string) ([]core.Requirement, error) {
-	data, ok, err := source.ReadIfPresent(projectRoot, "go.mod")
+	data, ok, err := source.ReadIfPresentMax(projectRoot, "go.mod", maxGoModBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -65,18 +70,28 @@ func (Detector) Detect(_ context.Context, projectRoot string) ([]core.Requiremen
 	}}, nil
 }
 
-// token kinds of the go.mod lexer (a reduction of x/mod's).
+// tok is one token of the go.mod lexer, a reduction of x/mod's reader
+// (the go command's own).
 type tok struct {
 	text string
-	kind byte // 'w' word, 'q' quoted, 'r' raw, '(' , ')', '\n', '=' for =>
+	kind byte // 'w' word, 'q' "quoted", 'r' `raw`, 'p' punctuation , [ ] { } ( ), '\n' end of line
 	line int
+}
+
+func isPunct(c byte) bool {
+	switch c {
+	case ',', '[', ']', '{', '}', '(', ')':
+		return true
+	}
+	return false
 }
 
 // lex splits go.mod into tokens the way cmd/go's reader does for the
 // purposes of finding statements: // comments dropped, "..." and `...`
-// kept as single tokens (so a `go` inside a string is not a verb),
-// parentheses and newlines significant. /* */ comments are refused, as
-// the go command refuses them.
+// single tokens (so a `go` inside a string is not a verb; a raw string
+// cannot span lines), and , [ ] { } ( ) tokens of their own that also end
+// a word — `go,` is the verb followed by a comma, not a word "go,".
+// /* */ comments are refused, as the go command refuses them.
 func lex(data []byte) ([]tok, error) {
 	var out []tok
 	line := 1
@@ -96,8 +111,8 @@ func lex(data []byte) ([]tok, error) {
 			}
 		case c == '/' && i+1 < len(data) && data[i+1] == '*':
 			return nil, fmt.Errorf("line %d: /* */ comments are not allowed; use //", line)
-		case c == '(' || c == ')':
-			out = append(out, tok{string(c), c, line})
+		case isPunct(c):
+			out = append(out, tok{string(c), 'p', line})
 			i++
 		case c == '"':
 			j := i + 1
@@ -126,7 +141,7 @@ func lex(data []byte) ([]tok, error) {
 			j := i
 			for j < len(data) {
 				d := data[j]
-				if d == ' ' || d == '\t' || d == '\r' || d == '\n' || d == '(' || d == ')' || d == '"' || d == '`' ||
+				if d == ' ' || d == '\t' || d == '\r' || d == '\n' || isPunct(d) || d == '"' || d == '`' ||
 					(d == '/' && j+1 < len(data) && (data[j+1] == '/' || data[j+1] == '*')) {
 					break
 				}
@@ -141,46 +156,54 @@ func lex(data []byte) ([]tok, error) {
 
 // parseGoDirective returns the version of the go directive. Statements
 // are found at depth zero only: a `go 1.99` line inside a `require (...)`
-// block is a module path, not the directive.
+// block is a module path, not the directive. As in the go command, `(`
+// opens a block only as the LAST token of a line (a `(` anywhere else is
+// an ordinary argument) and a block ends only at a line that STARTS with
+// `)`; anything else is the same file the go command would read
+// differently, which is exactly the kind of disagreement that would drop
+// or invent a requirement.
 func parseGoDirective(data []byte) (version string, found bool, err error) {
 	toks, err := lex(data)
 	if err != nil {
 		return "", false, err
 	}
-	i := 0
-	for i < len(toks) {
-		// Skip blank lines.
-		if toks[i].kind == '\n' {
-			i++
-			continue
-		}
-		verb := toks[i]
-		// Collect the rest of the statement: to end of line, or a whole
-		// parenthesised block.
-		i++
-		var args []tok
-		block := false
-		for i < len(toks) && toks[i].kind != '\n' {
-			if toks[i].kind == '(' && len(args) == 0 {
-				block = true
-				i++
-				for i < len(toks) && toks[i].kind != ')' {
-					i++
-				}
-				if i >= len(toks) {
-					return "", false, fmt.Errorf("line %d: unterminated block", verb.line)
-				}
-				i++ // the ')'
-				break
+	// Split into lines.
+	var lines [][]tok
+	var cur []tok
+	for _, t := range toks {
+		if t.kind == '\n' {
+			if len(cur) > 0 {
+				lines = append(lines, cur)
 			}
-			args = append(args, toks[i])
-			i++
-		}
-		if verb.kind != 'w' || verb.text != "go" {
+			cur = nil
 			continue
 		}
-		if block {
-			return "", false, fmt.Errorf("line %d: the go directive cannot be a block", verb.line)
+		cur = append(cur, t)
+	}
+	if len(cur) > 0 {
+		lines = append(lines, cur)
+	}
+
+	inBlock := false
+	blockLine := 0
+	for _, l := range lines {
+		if inBlock {
+			if l[0].kind == 'p' && l[0].text == ")" {
+				inBlock = false
+			}
+			continue
+		}
+		verb, args := l[0], l[1:]
+		isGo := verb.kind == 'w' && verb.text == "go"
+		if len(args) == 1 && args[0].kind == 'p' && args[0].text == "(" {
+			if isGo {
+				return "", false, fmt.Errorf("line %d: the go directive cannot be a block", verb.line)
+			}
+			inBlock, blockLine = true, verb.line
+			continue
+		}
+		if !isGo {
+			continue
 		}
 		if found {
 			return "", false, fmt.Errorf("line %d: repeated go directive", verb.line)
@@ -193,6 +216,9 @@ func parseGoDirective(data []byte) (version string, found bool, err error) {
 			return "", false, fmt.Errorf("line %d: invalid go version %q: must match format 1.23.0", verb.line, a.text)
 		}
 		version, found = a.text, true
+	}
+	if inBlock {
+		return "", false, fmt.Errorf("line %d: unterminated block", blockLine)
 	}
 	return version, found, nil
 }

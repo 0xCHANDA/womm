@@ -134,3 +134,25 @@ func TestReadIfPresentRefusesNonRegularAndOversizedSources(t *testing.T) {
 		t.Fatalf("oversized: %v", err)
 	}
 }
+
+func TestReadIfPresentMaxIsATighterBoundAndNeverAWiderOne(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "a"), []byte(strings.Repeat("x", 100)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if data, ok, err := ReadIfPresentMax(project, "a", 100); err != nil || !ok || len(data) != 100 {
+		t.Fatalf("at the limit: %d %v %v", len(data), ok, err)
+	}
+	if _, _, err := ReadIfPresentMax(project, "a", 99); err == nil || !strings.Contains(err.Error(), "size limit") || !strings.Contains(err.Error(), "99") {
+		t.Fatalf("over the limit: %v", err)
+	}
+	// A bound above MaxBytes is clamped, never honoured.
+	f, _ := os.Create(filepath.Join(project, "big"))
+	if err := f.Truncate(MaxBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if _, _, err := ReadIfPresentMax(project, "big", MaxBytes*10); err == nil {
+		t.Fatal("a limit above MaxBytes widened the bound")
+	}
+}

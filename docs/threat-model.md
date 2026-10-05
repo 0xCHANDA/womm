@@ -145,7 +145,16 @@ field. `go.mod` is read by the shared contained reader and parsed
 statically; the `toolchain` line is ignored. WOMM does not validate the
 rest of `go.mod`: a file the go command rejects for another reason still
 yields its `go` directive; one it rejects *about* the `go` directive is
-an error here too (differential-tested).
+an error here too, and a file it accepts yields exactly the version it
+reads (differential-tested on thousands of generated and byte-mutated
+real `go.mod` files). Tokenization follows the go command's reader:
+`, [ ] { } ( )` are tokens of their own, `(` opens a block only as the
+last token of a line, a block ends only at a line that starts with `)`.
+(A first version disagreed on exactly those points; an independent review
+found a `go.mod` the go command accepts as `go 1.99` that capture turned
+into zero requirements.) `go.mod` is capped at 1 MiB (a real one is a few
+KB): the lexer materializes tokens, and the generic 16 MiB source cap let a
+hostile file cost ~1.9 GB of memory.
 
 ## What is out of scope
 

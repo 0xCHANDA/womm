@@ -35,6 +35,17 @@ import (
 // Reads are bounded (MaxBytes); a larger source is an explicit
 // error, never a truncated interpretation.
 func ReadIfPresent(projectRoot, name string) ([]byte, bool, error) {
+	return ReadIfPresentMax(projectRoot, name, MaxBytes)
+}
+
+// ReadIfPresentMax is ReadIfPresent with a tighter bound for sources that
+// are small by nature and that a parser would otherwise amplify in
+// memory (a 16 MiB go.mod lexed into tokens took ~1.9 GB). max must not
+// exceed MaxBytes.
+func ReadIfPresentMax(projectRoot, name string, max int64) ([]byte, bool, error) {
+	if max > MaxBytes {
+		max = MaxBytes
+	}
 	root, err := os.OpenRoot(projectRoot)
 	if err != nil {
 		return nil, false, fmt.Errorf("cannot resolve project root: %w", err)
@@ -79,16 +90,16 @@ func ReadIfPresent(projectRoot, name string) ([]byte, bool, error) {
 	if !info.Mode().IsRegular() {
 		return nil, false, fmt.Errorf("%s is not a regular file (%s); refusing to read it", full, info.Mode().Type())
 	}
-	if info.Size() > MaxBytes {
-		return nil, false, fmt.Errorf("cannot read %s: %w (%d bytes)", full, ErrTooLarge, MaxBytes)
+	if info.Size() > max {
+		return nil, false, fmt.Errorf("cannot read %s: %w (%d bytes)", full, ErrTooLarge, max)
 	}
 
-	data, err := io.ReadAll(io.LimitReader(f, MaxBytes+1))
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
 	if err != nil {
 		return nil, false, fmt.Errorf("cannot read %s: %w", full, err)
 	}
-	if int64(len(data)) > MaxBytes {
-		return nil, false, fmt.Errorf("cannot read %s: %w (%d bytes)", full, ErrTooLarge, MaxBytes)
+	if int64(len(data)) > max {
+		return nil, false, fmt.Errorf("cannot read %s: %w (%d bytes)", full, ErrTooLarge, max)
 	}
 	return data, true, nil
 }
@@ -137,6 +148,5 @@ func escapesRoot(err error) bool {
 // arbitrary memory by growing them.
 const MaxBytes = 16 << 20
 
-// ErrTooLarge marks a declared source above MaxBytes.
-// ErrTooLarge marks a declared source above MaxBytes.
+// ErrTooLarge marks a declared source above its limit.
 var ErrTooLarge = errors.New("declared source exceeds the size limit")
