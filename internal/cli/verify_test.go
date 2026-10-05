@@ -11,6 +11,7 @@ import (
 
 	"github.com/0xCHANDA/womm/internal/core"
 	"github.com/0xCHANDA/womm/internal/inspect"
+	"github.com/0xCHANDA/womm/internal/inspect/toolpath"
 )
 
 type stubInspector struct {
@@ -26,7 +27,7 @@ func (s stubInspector) Inspect(_ context.Context, req core.Requirement) (core.Ob
 func useInspector(t *testing.T, s stubInspector) {
 	t.Helper()
 	prev := newInspectors
-	newInspectors = func() []inspect.Inspector { return []inspect.Inspector{s} }
+	newInspectors = func(*toolpath.Resolver) []inspect.Inspector { return []inspect.Inspector{s} }
 	t.Cleanup(func() { newInspectors = prev })
 }
 
@@ -309,7 +310,7 @@ func TestVerifyCommandCancelledPrintsNoVerdict(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	prev := newInspectors
-	newInspectors = func() []inspect.Inspector { return []inspect.Inspector{cancelStub{cancel}} }
+	newInspectors = func(*toolpath.Resolver) []inspect.Inspector { return []inspect.Inspector{cancelStub{cancel}} }
 	t.Cleanup(func() { newInspectors = prev })
 
 	dir := t.TempDir()

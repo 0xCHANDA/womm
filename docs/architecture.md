@@ -27,6 +27,7 @@ comparison is pure logic; reporting is presentation only.
 | `internal/detectors` | L0 | merged (PR 2) | `Detector` boundary: project filesystem reads only → `core.Requirement` |
 | `internal/detectors/node` | L0 | merged (PR 2) | `NodeDetector` (package.json `engines.node` + `.nvmrc`, conflict-safe) and `PackageManagerDetector` (`packageManager`, Corepack hash subset) |
 | `internal/inspect` | L1 | merged (PR 3, 8) | `Inspector` boundary: demand-driven machine observation → `core.Observation`; partial `Observation{Present: true}` next to a probe error |
+| `internal/inspect/toolpath` | L1 | integration/v0.2 | `Resolver`: ordered, validated search list (explicit `--tool-dir` directories, then the system allowlist) → absolute executable path; refuses project-controlled directories and symlinks into the project; never the inherited `PATH` |
 | `internal/inspect/node` | L1 | merged (PR 3) | `NodeInspector`: node/npm/pnpm/yarn `--version` probes with full L1 containment |
 | `internal/semverrange` | logic | merged (PR 10) | npm range grammar gate over Masterminds/semver: rejects `,`, `!=`, `=>`, `=<`, `~>`, empty sets, qualifiers on wildcards; normalizes whitespace |
 | `internal/compare` | logic | merged (PR 4) | pure `Compare(req, obs) → core.Match`; exact versions by equality, ranges for release versions only, prerelease-vs-range refused |
@@ -129,7 +130,9 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
    (`/usr/local/bin`, `/usr/bin`, `/bin`). A Node installed through a
    version manager under `$HOME` is reported as absent or shadowed by
    the system one — by design for v0.1 (never the inherited PATH),
-   and visible in the report as what was actually observed.
+   and visible in the report as what was actually observed. (On
+   `integration/v0.2`, `--tool-dir` names extra directories; see
+   `docs/proposals/version-managers.md`.)
 3. Only the Node.js ecosystem has a detector and an inspector.
 
 ## Security invariants (invariant — do not weaken)
@@ -181,14 +184,25 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
   `O_TRUNC` open blocked on a FIFO swap and wrote through hard links.
 
 **L1 — machine probes (`internal/inspect/node`):**
-- Executables resolve only from a hardcoded allowlist
-  (`/usr/local/bin`, `/usr/bin`, `/bin`) — never the inherited `PATH`,
-  never project-relative paths, never non-bare names.
+- Executables resolve only from an ordered, validated list
+  (`internal/inspect/toolpath`): directories the invoking user named
+  with `--tool-dir`, then the hardcoded allowlist (`/usr/local/bin`,
+  `/usr/bin`, `/bin`) — never the inherited `PATH`, never
+  project-relative paths, never non-bare names. A user directory is
+  refused when it is, or resolves into, the project (or the directory
+  of the verified file), sits under `node_modules`, or is
+  world-writable; a candidate that is a symlink into the project is an
+  error (`ErrUnsafe`), never skipped. The candidate's own path is what
+  runs (shims dispatch on their name), and it is recorded as
+  `Observation.Path`.
 - Execution is direct (`exec.CommandContext`, absolute resolved path,
   fixed `--version` arg) — no shell, no npm scripts, no `npx`/corepack.
 - `NODE_OPTIONS` is stripped from the probe environment (code-execution
   vector: `--require` runs arbitrary JS before `--version` prints);
-  `PATH` inside the probe is replaced with the sanitized allowlist.
+  `PATH` inside the probe is replaced: the system allowlist, preceded
+  by the executable's own (already validated) directory when it is not
+  a system one, so launchers such as nvm's `npm` find their sibling
+  `node`.
 - Loader injection (`LD_PRELOAD`, `LD_AUDIT`, `LD_LIBRARY_PATH`) and
   node's file-writing switches (`NODE_V8_COVERAGE`,
   `NODE_REDIRECT_WARNINGS`) are stripped; `HOME` and `COREPACK_HOME`

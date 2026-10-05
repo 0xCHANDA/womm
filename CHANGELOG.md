@@ -13,6 +13,19 @@ candidate content for the first tag, to be cut by a human.
   produced an observation (empty when nothing ran). `verify` reports it
   (`observed 24.7.0 at /usr/bin/node`, also for `UNREACHABLE` tools);
   it is host evidence, never compared and never written to `womm.yaml`.
+- `womm verify --tool-dir <absolute-dir>` (repeatable): extra directories
+  to resolve `node`/`npm`/`pnpm`/`yarn` from — nvm, fnm, Volta, asdf,
+  mise bin/shim directories — consulted in the order given **before**
+  the system directories, never the inherited `PATH`. Refused (usage
+  error, exit 2): relative paths, the project or anything inside it
+  (also the directory of `-f`), `node_modules`, world-writable
+  directories, symlinks landing in the project. A directory owned by
+  another user is accepted with a `warning:`. A binary that is a symlink
+  into the project is refused (exit 3), never run and never stepped
+  over. New package `internal/inspect/toolpath` owns resolution.
+- Probes of binaries from a user directory run with that directory first
+  on the probe `PATH`, so launcher scripts (`#!/usr/bin/env node`) find
+  their sibling node; system binaries keep the fixed system `PATH`.
 
 ## [Unreleased] — v0.1.0 candidate (Linux + Node.js vertical slice)
 

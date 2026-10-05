@@ -1,8 +1,11 @@
 # Proposal: observing version-managed Node installations
 
-Status: **proposal, not implemented**. Decision required from the
-owner (see "Recommendation"). Nothing in this document changes the
-v0.1 behavior.
+Status: **partially implemented on `integration/v0.2`** (not on
+`main`): the executed path as evidence (`core.Observation.Path`) and
+`--tool-dir` (option C). The `$HOME` shim directories (option A) and
+`WOMM_TOOL_DIRS` are described below; see "Implementation notes" for
+what was decided differently from this proposal and why. Nothing here
+changes the v0.1 behavior on `main`.
 
 ## Problem
 
@@ -154,3 +157,45 @@ Migration impact: none for existing users (system dirs stay first);
 - Volta/asdf shims run from cwd `/` → global version only; document.
 - Corepack-managed shims under `~/.cache/node/corepack` are never
   added (they are not on any list).
+
+## Implementation notes (integration/v0.2)
+
+Decisions taken while implementing C, where the code departs from the
+text above. Each is a one-line change to reverse if the owner disagrees
+(`internal/inspect/toolpath`).
+
+- **Explicit directories come before the system directories**, not
+  after. As a fallback `--tool-dir` is a trap: on any machine that also
+  has a system `node`, the directory the user typed would never be
+  consulted, and the report would be a verdict about the wrong binary —
+  including a false PASS when the system `node` is newer than the one
+  the user actually runs. The explicit flag is the strongest signal of
+  intent WOMM has; the system directories remain the fallback for every
+  tool the user's directories lack, and they are still searched in the
+  v0.1 order.
+- **`WOMM_TOOL_DIRS` is not implemented.** An environment variable is
+  reachable by launchers — `direnv`, `make`, an `npm run` script — the
+  same way the inherited `PATH` is, and nothing stops a launcher from
+  pointing it at a directory outside the project that the project
+  writes to. That is exactly the attack the allowlist exists to stop,
+  with no mitigation better than the heuristics rejected for option B.
+  A flag has to be typed by (or in a script written by) the user.
+- **A user directory that is world-writable is refused; one owned by
+  another user is accepted with a warning.** The second is the common
+  CI shape (Node installed by a build user, WOMM run as root), and the
+  user named the directory. The rule for the implicit `$HOME` shim
+  directories (option A) is stricter: nobody named them, so they must
+  be owned by the invoking user or root.
+- **The candidate's own path is executed, never its symlink target**:
+  mise's shims are symlinks to the `mise` binary that dispatch on
+  `argv[0]`; resolving them would observe the manager's version and
+  call it `node`. Containment is still decided on the fully resolved
+  target (a shim that resolves into the project is refused).
+- **The probe `PATH` gets the executable's own directory first** when it
+  is not a system directory (nvm/fnm/Volta `npm` and `pnpm` are
+  `#!/usr/bin/env node` launchers and would otherwise run on the system
+  `node`). The directory has already been validated; the inherited
+  `PATH` is still never consulted. System binaries keep the fixed
+  system `PATH`.
+- Every directory the project could influence is a *project root*: the
+  project-dir argument and the directory of the file given with `-f`.

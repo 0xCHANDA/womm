@@ -9,8 +9,9 @@
 // L1 rules, enforced throughout this package:
 //
 //   - known executable names only (supportedTools);
-//   - resolved from a sanitized system search path, never the
-//     inherited process PATH (see path.go);
+//   - resolved from an ordered, validated directory list (explicit
+//     user directories, then the system directories), never the
+//     inherited process PATH (see internal/inspect/toolpath);
 //   - executed directly (exec.CommandContext with the resolved
 //     absolute path and the fixed "--version" argument) — no shell,
 //     no npm scripts, no lifecycle hooks, no npx, no Corepack, no
@@ -35,7 +36,14 @@ import (
 	"github.com/Masterminds/semver/v3"
 
 	"github.com/0xCHANDA/womm/internal/core"
+	"github.com/0xCHANDA/womm/internal/inspect/toolpath"
 )
+
+// errExecutableNotFound reports that a tool name could not be resolved
+// in the configured directories. It is a sentinel distinguishing "not
+// installed" (a legitimate Observation, never an error) from a genuine
+// resolution failure such as toolpath.ErrUnsafe.
+var errExecutableNotFound = toolpath.ErrNotFound
 
 // ErrUnsupportedTool marks a Requirement.Name outside the tools this
 // Inspector knows how to probe. It is a sentinel: NodeInspector must
@@ -77,7 +85,7 @@ const (
 // See the package doc for the L1 guarantees it upholds.
 type NodeInspector struct {
 	// resolvePath resolves a bare tool name to an absolute executable
-	// path. Production code always uses resolveSystemPath; tests in
+	// path. Production code always uses a toolpath.Resolver; tests in
 	// this package may substitute it to point at fixtures without
 	// touching the real machine or its PATH.
 	resolvePath func(name string) (string, error)
@@ -106,11 +114,17 @@ type NodeInspector struct {
 const probeDir = "/"
 
 // NewNodeInspector returns a NodeInspector configured for production
-// use: real sanitized-PATH resolution, the filesystem root as the
-// working directory, and the full 5-second probe timeout.
-func NewNodeInspector() *NodeInspector {
+// use over the system directories only: the filesystem root as the
+// working directory and the full 5-second probe timeout.
+func NewNodeInspector() *NodeInspector { return NewNodeInspectorWith(toolpath.System()) }
+
+// NewNodeInspectorWith is NewNodeInspector over the given resolver,
+// which decides where executables come from (explicit user directories
+// before the system ones). Everything else — cwd, timeout, environment,
+// output cap — is identical for every resolver.
+func NewNodeInspectorWith(r *toolpath.Resolver) *NodeInspector {
 	return &NodeInspector{
-		resolvePath: resolveSystemPath,
+		resolvePath: r.Resolve,
 		runDir:      probeDir,
 		timeout:     probeTimeout,
 	}
@@ -171,13 +185,13 @@ func (n *NodeInspector) probe(ctx context.Context, path string) (string, error) 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// path is only ever a value resolveSystemPath returned: an
-	// absolute path inside the fixed system allowlist. Executed
-	// directly, with a fixed argument — no shell involved.
+	// path is only ever a value the resolver returned: an absolute path
+	// inside the validated directory list. Executed directly, with a
+	// fixed argument — no shell involved.
 	becomeSubreaper()
 	cmd := exec.CommandContext(ctx, path, "--version")
 	cmd.Dir = n.runDir
-	cmd.Env = sanitizedEnv()
+	cmd.Env = sanitizedEnvFor(path)
 	cmd.Stdin = nil
 
 	// Run the probe in its own process group. If the resolved binary
@@ -243,10 +257,19 @@ func (n *NodeInspector) probe(ctx context.Context, path string) (string, error) 
 // prints a version. The L1 guarantee is "never execute project
 // code", so a code-execution vector in the inherited environment is
 // filtered out regardless of who set it.
-func sanitizedEnv() []string {
+func sanitizedEnv() []string { return sanitizedEnvFor("") }
+
+// sanitizedEnvFor is sanitizedEnv for a probe of execPath. A binary
+// from a user-named directory may be a launcher that finds its sibling
+// tools through PATH — npm and pnpm from nvm, fnm or Volta are
+// `#!/usr/bin/env node` scripts — and with the system directories
+// alone they would silently run on the system node (or fail to start).
+// So that directory, already validated by the resolver, goes first.
+// System binaries keep exactly the fixed system PATH.
+func sanitizedEnvFor(execPath string) []string {
 	env := os.Environ()
 	stripped := strippedEnvKeys
-	filtered := make([]string, 0, len(env)+len(forcedEnv))
+	filtered := make([]string, 0, len(env)+len(forcedEnv)+1)
 	for _, kv := range env {
 		hostile := false
 		for _, key := range stripped {
@@ -260,16 +283,36 @@ func sanitizedEnv() []string {
 		}
 		filtered = append(filtered, kv)
 	}
-	return append(filtered, forcedEnv...)
+	filtered = append(filtered, forcedEnv...)
+	return append(filtered, "PATH="+probePath(execPath))
+}
+
+// probePath is the PATH of a probe: the executable's own directory when
+// it is not a system directory, then the system directories.
+func probePath(execPath string) string {
+	dirs := append([]string(nil), toolpath.SystemDirs...)
+	if execPath != "" {
+		dir := filepath.Dir(execPath)
+		system := false
+		for _, d := range dirs {
+			if d == dir {
+				system = true
+				break
+			}
+		}
+		if !system {
+			dirs = append([]string{dir}, dirs...)
+		}
+	}
+	return strings.Join(dirs, string(os.PathListSeparator))
 }
 
 // strippedEnvKeys are the environment variables removed from every
-// probe's environment. PATH is replaced (not just dropped) via
-// forcedEnv with the sanitized system path; the rest are simply
-// removed.
+// probe's environment. PATH is replaced (not just dropped) with the
+// probe PATH (see probePath); the rest are simply removed.
 var strippedEnvKeys = []string{
 	"NODE_OPTIONS", // node-only: can inject --require/-e code execution
-	"PATH",         // replaced by forcedEnv
+	"PATH",         // replaced by probePath
 	// Dynamic-loader injection: a preloaded or audit library runs
 	// before main() of every dynamically linked probe (node is).
 	// LD_LIBRARY_PATH can substitute libc itself. Same class as
@@ -308,7 +351,8 @@ var strippedEnvKeys = []string{
 }
 
 // forcedEnv are the variables every probe gets with fixed values,
-// after strippedEnvKeys removed any inherited copy.
+// after strippedEnvKeys removed any inherited copy (PATH is set per
+// probe, see probePath).
 //
 // On many machines /usr/local/bin/pnpm and /usr/local/bin/yarn are
 // Corepack shims: "pnpm --version" may download pnpm from the network
@@ -326,7 +370,6 @@ var strippedEnvKeys = []string{
 // are belt and suspenders: the cwd has no ancestors to walk, and the
 // walkers are told not to act on what they would find.
 var forcedEnv = []string{
-	"PATH=" + strings.Join(systemPathDirs, string(os.PathListSeparator)),
 	"COREPACK_ENABLE_NETWORK=0",
 	"COREPACK_ENABLE_AUTO_PIN=0",
 	"COREPACK_ENABLE_STRICT=0",

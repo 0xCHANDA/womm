@@ -170,11 +170,19 @@ on stdout *and* echoes the detail as an `error: …` line on stderr.
 
 ## How probes are contained
 
-- Tools resolve only from `/usr/local/bin`, `/usr/bin`, `/bin` —
-  never the inherited `PATH`, never the project tree. A Node
-  installed under `$HOME` by a version manager is reported as absent
-  (or shadowed by the system one); the report shows what was actually
-  observed.
+- Tools resolve only from the directories you name with `--tool-dir`
+  (repeatable, consulted in the order given) and then `/usr/local/bin`,
+  `/usr/bin`, `/bin` — never the inherited `PATH`, never the project
+  tree. Without `--tool-dir`, a Node installed under `$HOME` by a
+  version manager is reported as absent (or shadowed by the system
+  one); pass its bin directory, e.g.
+  `womm verify --tool-dir ~/.nvm/versions/node/v24.7.0/bin`. A
+  `--tool-dir` must be an absolute path (your shell expands `~`), must
+  exist, and is refused (usage error, exit 2) when it is the project,
+  inside it, under a `node_modules`, or world-writable; one owned by
+  another user is accepted with a `warning:` on stderr. A tool that is
+  a symlink into the project is refused, never run. The report shows
+  which executable answered.
 - Fixed `--version` argument, no shell, working directory `/` (never
   the project root, no writable ancestors for yarn/pnpm to walk up
   into).

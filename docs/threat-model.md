@@ -57,6 +57,32 @@ no home, a non-existent path is used and cached shims fail fast
 Stripped: they make node write files during `--version`, and a probe
 never mutates the machine.
 
+## Tool directories (`--tool-dir`)
+
+`--tool-dir` is user-controlled (the invoking user types it) and is
+consulted before the system directories. The project cannot configure
+it: it is not read from `womm.yaml` or any project file, and there is
+deliberately no environment-variable form, because launchers can set
+environment variables the same way they can prepend to `PATH`.
+
+| Input | WOMM's answer |
+|---|---|
+| relative path, `~`, empty | usage error (exit 2) |
+| the project, anything inside it, or the directory of `-f` | usage error: project-controlled |
+| a path through `node_modules` | usage error |
+| a symlink (or `..`) that lands inside the project | usage error, judged on the lexical *and* the canonical path |
+| world-writable directory | usage error: any local user could plant a binary |
+| directory owned by another user | accepted, `warning:` on stderr (user's call) |
+| a binary there that is a symlink resolving into the project | operational error (exit 3); not run, not stepped over |
+| a dangling symlink in a user directory | operational error, never "absent" |
+| inherited `PATH` | never consulted |
+
+The probe's own `PATH` gets the executable's directory first (see
+`docs/architecture.md`); that directory has passed the checks above.
+Residual risk: the user (or root) names a directory another user can
+replace binaries in; WOMM warns about foreign ownership and refuses
+world-writable directories but cannot judge every ancestor.
+
 ## What is out of scope
 
 - A hostile **root** or a compromised system directory: WOMM

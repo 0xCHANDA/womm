@@ -4,23 +4,25 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	"github.com/0xCHANDA/womm/internal/capture"
 	"github.com/0xCHANDA/womm/internal/inspect"
 	nodeinspect "github.com/0xCHANDA/womm/internal/inspect/node"
+	"github.com/0xCHANDA/womm/internal/inspect/toolpath"
 	"github.com/0xCHANDA/womm/internal/report"
 	"github.com/0xCHANDA/womm/internal/schema"
 	"github.com/0xCHANDA/womm/internal/verify"
 )
 
-// newInspectors builds the inspector set `verify` uses. Production
-// always probes the real machine through the hardened NodeInspector;
-// same-package tests substitute fakes so results never depend on what
-// the test host has installed.
-var newInspectors = func() []inspect.Inspector {
-	return []inspect.Inspector{nodeinspect.NewNodeInspector()}
+// newInspectors builds the inspector set `verify` uses, resolving
+// executables through r. Production always probes the real machine
+// through the hardened NodeInspector; same-package tests substitute
+// fakes so results never depend on what the test host has installed.
+var newInspectors = func(r *toolpath.Resolver) []inspect.Inspector {
+	return []inspect.Inspector{nodeinspect.NewNodeInspectorWith(r)}
 }
 
 // exitCodeError carries an exit code for outcomes that are not
@@ -33,6 +35,7 @@ func (e *exitCodeError) Error() string { return fmt.Sprintf("exit %d", e.code) }
 
 func newVerifyCmd() *cobra.Command {
 	var file string
+	var toolDirs []string
 	cmd := &cobra.Command{
 		Use:   "verify [project-dir]",
 		Short: "Check this machine against the project's womm.yaml",
@@ -43,7 +46,12 @@ func newVerifyCmd() *cobra.Command {
 			"Exit status: 0 all PASS; 1 at least one FAIL and nothing " +
 			"inconclusive; 2 usage error; 3 inconclusive (UNKNOWN or " +
 			"UNREACHABLE result, malformed configuration, or an operational " +
-			"failure) — 3 takes precedence over 1.",
+			"failure) — 3 takes precedence over 1.\n\n" +
+			"Executables are resolved from --tool-dir directories (in the " +
+			"order given), then /usr/local/bin, /usr/bin and /bin — never from " +
+			"the inherited PATH. A directory inside the project, under a " +
+			"node_modules or world-writable is refused; one owned by another " +
+			"user is accepted with a warning.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			root := "."
@@ -58,6 +66,23 @@ func newVerifyCmd() *cobra.Command {
 				}
 				file = capture.DefaultOutput(root)
 			}
+			resolver, err := toolpath.New(toolpath.Config{
+				// Whatever lives in the project (or beside the file being
+				// verified) is project-controlled and never searched.
+				ProjectRoots: []string{root, filepath.Dir(file)},
+				ExplicitDirs: toolDirs,
+			})
+			if err != nil {
+				var de *toolpath.DirError
+				if errors.As(err, &de) {
+					// A bad flag value is a usage error (exit 2).
+					return fmt.Errorf("invalid argument %q for \"--tool-dir\" flag: %s", de.Dir, de.Reason)
+				}
+				return err
+			}
+			for _, w := range resolver.Warnings() {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
+			}
 			f, warnings, err := schema.Load(file)
 			for _, w := range warnings {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
@@ -69,7 +94,7 @@ func newVerifyCmd() *cobra.Command {
 				return err
 			}
 
-			res := verify.Verify(cmd.Context(), f, newInspectors())
+			res := verify.Verify(cmd.Context(), f, newInspectors(resolver))
 			if verify.Cancelled(res) {
 				// An interrupted run has no verdict to show: partial
 				// PASS lines would read as a result. Say what
@@ -95,5 +120,6 @@ func newVerifyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "womm.yaml to verify (default: <project-dir>/womm.yaml)")
+	cmd.Flags().StringArrayVar(&toolDirs, "tool-dir", nil, "absolute directory to resolve tools from, before the system directories (repeatable; e.g. a version manager's bin directory)")
 	return cmd
 }
