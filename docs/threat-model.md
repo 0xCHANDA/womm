@@ -49,8 +49,14 @@ into the project turns a version probe into project code execution
 (demonstrated by review). The probe therefore gets `HOME` from the
 account's passwd entry and `COREPACK_HOME` derived from it;
 `XDG_CACHE_HOME` / `XDG_CONFIG_HOME` are dropped. If the account has
-no home, a non-existent path is used and cached shims fail fast
-(`UNREACHABLE`).
+no home — including a uid with no passwd entry at all (Docker
+`--user`, OpenShift) — a non-existent path is used and cached shims
+fail fast (`UNREACHABLE`). The lookup deliberately avoids
+`os/user.Current()` and `user.LookupId`: without cgo (the release
+binaries) both fall back to the inherited `$HOME` when `$USER` is set
+and the uid has no passwd entry, which would hand the probe the very
+value this section forbids; the static build reads `/etc/passwd`
+itself.
 
 ### `NODE_V8_COVERAGE` / `NODE_REDIRECT_WARNINGS`
 

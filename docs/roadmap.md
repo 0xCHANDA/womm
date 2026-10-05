@@ -56,6 +56,13 @@ as future is implemented. PRs update this file; they don't improvise.
   #27–#29) — threat model, version-manager proposal, v0.2 proposal,
   dormant tag-triggered release workflow, acceptance matrix,
   exit-code fuzz target, docs truth audit.
+- **Hardening: account home without cgo** (Campaign III RC audit) —
+  `os/user.Current()` and `user.LookupId` fall back to the inherited
+  `$HOME` without cgo (the release configuration) when the uid has no
+  passwd entry and `$USER` is set, which re-opened the Corepack
+  `COREPACK_HOME` path closed by #33. Reproduced on the RC binary
+  (`HOME=<project>` reached the probe), fixed by reading `/etc/passwd`
+  directly; CI now also runs the tests with `CGO_ENABLED=0`.
 - **Hardening: `.nvmrc` per nvm** (PR #18, from independent review)
   — a comment-only `.nvmrc` or a `node=<v>` setting produced silent
   absence although nvm rejects both; now explicit errors, inline `#`
