@@ -295,6 +295,11 @@ func probePath(execPath string) string {
 	dirs := append([]string(nil), toolpath.SystemDirs...)
 	if execPath != "" {
 		dir := filepath.Dir(execPath)
+		if strings.ContainsAny(dir, ":\x00\n\r") {
+			// Never emit an entry that would split into several: the
+			// resolver refuses such directories, this is the backstop.
+			return strings.Join(dirs, string(os.PathListSeparator))
+		}
 		system := false
 		for _, d := range dirs {
 			if d == dir {

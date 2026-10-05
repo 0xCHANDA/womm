@@ -32,6 +32,12 @@ candidate content for the first tag, to be cut by a human.
   otherwise it is skipped with a `warning:` on stderr. A system tool
   always wins. nvm and fnm: use `--tool-dir`. The account-home lookup moved
   to `toolpath.AccountHome`.
+- Review fixes for the directory support: a `--tool-dir` (or account home)
+  containing `:` or a control character is refused (it would split the
+  probe `PATH`); an unusable entry named like the tool in a user
+  directory is an error instead of a silent step to the system binary;
+  an unsearchable implicit shim directory is skipped with a warning;
+  every path in a message is quoted.
 - The probe environment is now an allowlist (locale only inherited;
   everything else forced). Version-manager shims are dispatchers driven
   by `VOLTA_HOME`/`MISE_*`/`ASDF_*`/`XDG_DATA_HOME`, which a launcher can

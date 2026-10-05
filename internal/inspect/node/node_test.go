@@ -1007,3 +1007,14 @@ func TestSanitizedEnvIsAnAllowlist(t *testing.T) {
 		t.Errorf("locale not preserved: %v", got)
 	}
 }
+
+// probePath must never emit a directory that would split into several
+// entries: only validated, separator-free directories may be prepended.
+func TestProbePathNeverSplitsADirectory(t *testing.T) {
+	sys := strings.Join(toolpath.SystemDirs, string(os.PathListSeparator))
+	for _, exec := range []string{"/x/a:/x/evil/npm", "/x/a:/node", "/x/nl\n/node"} {
+		if got := probePath(exec); got != sys {
+			t.Errorf("probePath(%q) = %q, want the system PATH only", exec, got)
+		}
+	}
+}
