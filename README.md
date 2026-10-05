@@ -171,12 +171,16 @@ on stdout *and* echoes the detail as an `error: …` line on stderr.
 ## How probes are contained
 
 - Tools resolve only from the directories you name with `--tool-dir`
-  (repeatable, consulted in the order given) and then `/usr/local/bin`,
-  `/usr/bin`, `/bin` — never the inherited `PATH`, never the project
-  tree. Without `--tool-dir`, a Node installed under `$HOME` by a
-  version manager is reported as absent (or shadowed by the system
-  one); pass its bin directory, e.g.
-  `womm verify --tool-dir ~/.nvm/versions/node/v24.7.0/bin`. A
+  (repeatable, consulted in the order given), then `/usr/local/bin`,
+  `/usr/bin`, `/bin`, then the account's `~/.volta/bin`,
+  `~/.asdf/shims`, `~/.local/share/mise/shims` and `~/.local/bin` —
+  never the inherited `PATH`, never the project tree. Those four are
+  taken from the user database, not `$HOME`, and are used only when
+  they exist and are owned by you or root, not world-writable, and
+  outside the project; an unsafe one is skipped with a `warning:`. A
+  tool already installed system-wide always wins over them. nvm and
+  fnm keep one directory per Node version: pass it,
+  e.g. `womm verify --tool-dir ~/.nvm/versions/node/v24.7.0/bin`. A
   `--tool-dir` must be an absolute path (your shell expands `~`), must
   exist, and is refused (usage error, exit 2) when it is the project,
   inside it, under a `node_modules`, or world-writable; one owned by

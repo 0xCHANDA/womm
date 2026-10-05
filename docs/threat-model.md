@@ -83,6 +83,21 @@ environment variables the same way they can prepend to `PATH`.
 | a dangling symlink in a user directory | operational error, never "absent" |
 | inherited `PATH` | never consulted |
 
+### The implicit shim directories
+
+`~/.volta/bin`, `~/.asdf/shims`, `~/.local/share/mise/shims` and
+`~/.local/bin` under the account's home are searched after the system
+directories. The home comes from the user database, never from `$HOME`
+(a launcher can point `$HOME` into the project: with a hostile `$HOME`
+the project's own `.volta/bin` is not searched). Nobody typed these
+directories, so the rules are stricter than for `--tool-dir`: a
+directory is used only when it is owned by the invoking user or root,
+not world-writable, and outside the project (and `node_modules`);
+anything else is skipped with a `warning:` on stderr. Running `womm`
+from the home directory itself makes every shim directory
+project-controlled, so all are skipped. Candidates are
+containment-checked like any other.
+
 The probe's own `PATH` gets the executable's directory first (see
 `docs/architecture.md`); that directory has passed the checks above.
 Residual risk: the user (or root) names a directory another user can

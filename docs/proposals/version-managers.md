@@ -1,10 +1,11 @@
 # Proposal: observing version-managed Node installations
 
-Status: **partially implemented on `integration/v0.2`** (not on
-`main`): the executed path as evidence (`core.Observation.Path`) and
-`--tool-dir` (option C). The `$HOME` shim directories (option A) and
-`WOMM_TOOL_DIRS` are described below; see "Implementation notes" for
-what was decided differently from this proposal and why. Nothing here
+Status: **implemented on `integration/v0.2`** (not on `main`): the
+executed path as evidence (`core.Observation.Path`), `--tool-dir`
+(option C) and the fixed `$HOME` shim directories (option A).
+`WOMM_TOOL_DIRS` is deliberately not implemented, nvm/fnm discovery
+(option D) is out of scope; see "Implementation notes" for what was
+decided differently from this proposal and why. Nothing here
 changes the v0.1 behavior on `main`.
 
 ## Problem
@@ -199,3 +200,23 @@ text above. Each is a one-line change to reverse if the owner disagrees
   system `PATH`.
 - Every directory the project could influence is a *project root*: the
   project-dir argument and the directory of the file given with `-f`.
+- **The shim directories (option A) are searched after the system
+  directories**, as proposed: nobody typed them, so they never override
+  a system tool and a machine that already has one sees no change. The
+  cost is real and stated: a Volta/asdf/mise user who also has a system
+  `node` is observed against the system one (the report says
+  `at /usr/bin/node`); `--tool-dir ~/.volta/bin` is how to say "mine
+  first".
+- **Their home is the account's, not `$HOME`** (`toolpath.AccountHome`,
+  the same lookup the probe's forced `HOME` uses), and each directory
+  must exist, be owned by the invoking user or root, not be
+  world-writable, and sit outside the project and `node_modules`. An
+  absent directory is silent; an unsafe one is skipped with a
+  `warning:` on stderr. Candidates are still containment-checked after
+  symlink resolution.
+- Not in the fixed list on purpose: `~/.nvm`, `~/.fnm` (one directory
+  per version, no stable launcher), `~/.npm-global/bin`,
+  `~/.local/share/pnpm`, `~/.yarn/bin` (package-manager globals, not
+  runtime selectors), Homebrew-on-Linux. Adding a path to
+  `toolpath.UserShimDirs` is a security decision with a test, not a
+  convenience.

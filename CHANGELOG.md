@@ -23,6 +23,15 @@ candidate content for the first tag, to be cut by a human.
   another user is accepted with a `warning:`. A binary that is a symlink
   into the project is refused (exit 3), never run and never stepped
   over. New package `internal/inspect/toolpath` owns resolution.
+- Implicit version-manager directories: after `--tool-dir` and the system
+  directories, `verify` also searches `~/.volta/bin`, `~/.asdf/shims`,
+  `~/.local/share/mise/shims` and `~/.local/bin` under the account's home
+  (from the user database, never `$HOME`). A directory is used only when
+  it exists, is owned by the invoking user or root, is not
+  world-writable and lies outside the project and `node_modules`;
+  otherwise it is skipped with a `warning:` on stderr. A system tool
+  always wins. nvm and fnm: use `--tool-dir`. The account-home lookup moved
+  to `toolpath.AccountHome`.
 - Probes of binaries from a user directory run with that directory first
   on the probe `PATH`, so launcher scripts (`#!/usr/bin/env node`) find
   their sibling node; system binaries keep the fixed system `PATH`.
