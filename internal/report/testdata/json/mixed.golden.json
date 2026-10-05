@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "result": "inconclusive",
+  "exitCode": 3,
+  "requirements": [
+    {
+      "name": "node",
+      "constraint": ">=22 <25",
+      "status": "pass",
+      "reason": "observed version satisfies the requirement",
+      "observation": {
+        "present": true,
+        "version": "24.7.0",
+        "path": "/home/u/.volta/bin/node"
+      },
+      "evidence": [
+        {
+          "source": "package.json",
+          "field": "engines.node",
+          "value": ">=22 <25"
+        },
+        {
+          "source": ".nvmrc",
+          "field": "version",
+          "value": "v24.7.0"
+        }
+      ]
+    },
+    {
+      "name": "npm",
+      "constraint": ">=10",
+      "status": "unknown",
+      "reason": "target is present but its version is unknown",
+      "observation": {
+        "present": true,
+        "version": null,
+        "path": "/usr/bin/npm"
+      },
+      "evidence": [
+        {
+          "source": "package.json",
+          "field": "engines.npm",
+          "value": ">=10"
+        }
+      ]
+    },
+    {
+      "name": "pnpm",
+      "constraint": "10.15.1",
+      "status": "fail",
+      "reason": "required target is absent",
+      "observation": {
+        "present": false,
+        "version": null,
+        "path": null
+      },
+      "evidence": [
+        {
+          "source": "package.json",
+          "field": "packageManager",
+          "value": "pnpm@10.15.1"
+        }
+      ]
+    },
+    {
+      "name": "yarn",
+      "constraint": "present",
+      "status": "unreachable",
+      "reason": "target is present but could not be queried: inspecting yarn: version probe timed out after 5s",
+      "observation": {
+        "present": true,
+        "version": null,
+        "path": "/usr/local/bin/yarn"
+      },
+      "evidence": [
+        {
+          "source": "package.json",
+          "field": "packageManager",
+          "value": "yarn@4.0.0"
+        }
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "kind": "undecidable",
+      "message": "npm: prerelease observed against a version range: \"11.0.0-rc.1\" against \">=10\""
+    }
+  ],
+  "summary": {
+    "total": 4,
+    "pass": 1,
+    "fail": 1,
+    "unknown": 1,
+    "unreachable": 1
+  }
+}

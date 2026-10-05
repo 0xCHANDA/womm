@@ -23,6 +23,15 @@ candidate content for the first tag, to be cut by a human.
   another user is accepted with a `warning:`. A binary that is a symlink
   into the project is refused (exit 3), never run and never stepped
   over. New package `internal/inspect/toolpath` owns resolution.
+- `womm verify --format json`: one deterministic JSON document on stdout
+  (schema version 1, explicit public DTO, documented in
+  `docs/output-json.md`) with requirements, status, reason, observation
+  incl. the executed `path`, evidence, classified operational errors and
+  a summary. Exit code and stderr are identical to the human format;
+  no document when nothing was verified (usage error, missing/malformed
+  `womm.yaml`, interrupted run). `verify.Verdict` / `verify.ErrorKind`
+  classify by sentinel, never by text; inspection failures now wrap
+  `verify.ErrInspectionFailed` (message unchanged).
 - Implicit version-manager directories: after `--tool-dir` and the system
   directories, `verify` also searches `~/.volta/bin`, `~/.asdf/shims`,
   `~/.local/share/mise/shims` and `~/.local/bin` under the account's home

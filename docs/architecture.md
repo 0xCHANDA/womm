@@ -33,7 +33,7 @@ comparison is pure logic; reporting is presentation only.
 | `internal/compare` | logic | merged (PR 4) | pure `Compare(req, obs) → core.Match`; exact versions by equality, ranges for release versions only, prerelease-vs-range refused |
 | `internal/capture` | orchestration (L0) | merged (PR 7) | `Capture(root)`: run the fixed detector set → sorted `schema.File`; `Write(path, file, force)`: never follows symlinks, never overwrites without `--force` |
 | `internal/verify` | orchestration | merged (PR 8) | `Verify(file, inspectors) → Result{Matches, Errors}`: inspect → compare, maps known-present probe failures to `unreachable`; `ExitCode(Result)` |
-| `internal/report` | presentation | merged (PR 6) | `Render([]core.Match)`: deterministic order + wording, `Summarize` counts; no inspection, no comparison, no exit codes |
+| `internal/report` | presentation | merged (PR 6) | `Render([]core.Match)`: deterministic order + wording, `Summarize` counts; no inspection, no comparison, no exit codes. On `integration/v0.2`: `RenderJSON` — the public, versioned `--format json` document (`docs/output-json.md`), written as its own DTO; it presents the verdict and exit code it is given and decides neither |
 
 ## Data flow (current and planned)
 

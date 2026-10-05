@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "result": "fail",
+  "exitCode": 1,
+  "requirements": [
+    {
+      "name": "pnpm",
+      "constraint": "10.15.1",
+      "status": "fail",
+      "reason": "required target is absent",
+      "observation": {
+        "present": false,
+        "version": null,
+        "path": null
+      },
+      "evidence": [
+        {
+          "source": "package.json",
+          "field": "packageManager",
+          "value": "pnpm@10.15.1"
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "summary": {
+    "total": 1,
+    "pass": 0,
+    "fail": 1,
+    "unknown": 0,
+    "unreachable": 0
+  }
+}

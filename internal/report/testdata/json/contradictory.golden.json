@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "result": "inconclusive",
+  "exitCode": 3,
+  "requirements": [
+    {
+      "name": "node",
+      "constraint": ">=22",
+      "status": "unknown",
+      "reason": "observation is contradictory: the target is reported absent but with a version",
+      "observation": {
+        "present": false,
+        "version": "24.7.0",
+        "path": null
+      },
+      "evidence": [
+        {
+          "source": "package.json",
+          "field": "engines.node",
+          "value": ">=22"
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "summary": {
+    "total": 1,
+    "pass": 0,
+    "fail": 0,
+    "unknown": 1,
+    "unreachable": 0
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "result": "pass",
+  "exitCode": 0,
+  "requirements": [
+    {
+      "name": "node",
+      "constraint": ">=22 <25",
+      "status": "pass",
+      "reason": "observed version satisfies the requirement",
+      "observation": {
+        "present": true,
+        "version": "24.7.0",
+        "path": "/home/u/.volta/bin/node"
+      },
+      "evidence": [
+        {
+          "source": "package.json",
+          "field": "engines.node",
+          "value": ">=22 <25"
+        },
+        {
+          "source": ".nvmrc",
+          "field": "version",
+          "value": "v24.7.0"
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "summary": {
+    "total": 1,
+    "pass": 1,
+    "fail": 0,
+    "unknown": 0,
+    "unreachable": 0
+  }
+}

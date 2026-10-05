@@ -29,6 +29,12 @@ import (
 // machine: no match is fabricated and the run is inconclusive.
 var ErrUnsupportedRequirement = errors.New("no inspector supports requirement")
 
+// ErrInspectionFailed marks an inspection that failed without
+// establishing anything about the target (the failure is WOMM's, not the
+// machine's). It exists so machine-readable output can classify the
+// error without parsing its text; the text itself is unchanged.
+var ErrInspectionFailed = errors.New("inspection failed")
+
 // Exit codes of `womm verify`. The full contract lives in ExitCode.
 const (
 	ExitPass         = 0
@@ -128,7 +134,7 @@ func Verify(ctx context.Context, f *schema.File, inspectors []inspect.Inspector)
 			}
 			// Nothing was established about the target; the failure is
 			// WOMM's, not the machine's. No match is fabricated.
-			res.Errors = append(res.Errors, fmt.Errorf("%s: inspection failed: %w", req.Name, err))
+			res.Errors = append(res.Errors, fmt.Errorf("%s: %w: %w", req.Name, ErrInspectionFailed, err))
 			continue
 		}
 
@@ -193,4 +199,50 @@ func Cancelled(r Result) bool {
 		}
 	}
 	return false
+}
+
+// Verdict names the outcome ExitCode encodes, for machine-readable
+// output: "pass" (0), "fail" (1) or "inconclusive" (3). It is derived
+// from ExitCode and can never disagree with it.
+func Verdict(r Result) string {
+	switch ExitCode(r) {
+	case ExitPass:
+		return "pass"
+	case ExitFail:
+		return "fail"
+	default:
+		return "inconclusive"
+	}
+}
+
+// Kinds of operational error, for machine-readable output.
+const (
+	KindUnsupportedRequirement = "unsupported_requirement"
+	KindInspectionFailed       = "inspection_failed"
+	// KindUndecidable: compare refused to decide (malformed constraint,
+	// prerelease against a range, contradictory observation...). A match
+	// with status unknown exists alongside it.
+	KindUndecidable = "undecidable"
+	KindCancelled   = "cancelled"
+	KindOther       = "other"
+)
+
+// ErrorKind classifies an operational error from Result.Errors by its
+// sentinel, never by its text.
+func ErrorKind(err error) string {
+	switch {
+	case errors.Is(err, ErrUnsupportedRequirement):
+		return KindUnsupportedRequirement
+	case errors.Is(err, ErrInspectionFailed):
+		return KindInspectionFailed
+	case errors.Is(err, compare.ErrNameMismatch),
+		errors.Is(err, compare.ErrInconsistentObservation),
+		errors.Is(err, compare.ErrInvalidConstraint),
+		errors.Is(err, compare.ErrInvalidObservedVersion),
+		errors.Is(err, compare.ErrPrereleaseRange):
+		return KindUndecidable
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return KindCancelled
+	}
+	return KindOther
 }

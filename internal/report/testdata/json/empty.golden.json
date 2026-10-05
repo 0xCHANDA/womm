@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "result": "pass",
+  "exitCode": 0,
+  "requirements": [],
+  "errors": [],
+  "summary": {
+    "total": 0,
+    "pass": 0,
+    "fail": 0,
+    "unknown": 0,
+    "unreachable": 0
+  }
+}
