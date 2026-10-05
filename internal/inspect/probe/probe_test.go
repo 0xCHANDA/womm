@@ -115,3 +115,30 @@ func TestRunKillsAnEscapedDescendantOnSuccessToo(t *testing.T) {
 		t.Fatal("an escaped (setsid) descendant survived a successful probe")
 	}
 }
+
+// The documented bounds are part of the contract, not just constants the
+// tests compare against themselves.
+func TestDocumentedBoundsArePinnedByValue(t *testing.T) {
+	if DefaultTimeout != 5*time.Second || WaitDelay != 2*time.Second || MaxOutputBytes != 4096 || Dir != "/" {
+		t.Errorf("bounds changed: timeout %s waitDelay %s output %d dir %q", DefaultTimeout, WaitDelay, MaxOutputBytes, Dir)
+	}
+}
+
+func TestRunMergesStderrIntoTheBoundedOutput(t *testing.T) {
+	out, err := Run(context.Background(), spec(script(t, "echo to-stderr >&2\necho to-stdout\n"), 0))
+	if err != nil || !strings.Contains(out, "to-stderr") || !strings.Contains(out, "to-stdout") {
+		t.Fatalf("%q, %v", out, err)
+	}
+}
+
+// A descendant that escaped the group (setsid) and keeps the output pipe
+// open must not hold Run beyond WaitDelay, and must not outlive it.
+func TestRunIsBoundedByWaitDelayWhenAnEscapeeHoldsThePipe(t *testing.T) {
+	p := script(t, "setsid sleep 30 &\necho 1.0.0\n") // inherits stdout: holds the pipe
+	start := time.Now()
+	_, _ = Run(context.Background(), spec(p, 0))
+	elapsed := time.Since(start)
+	if elapsed < WaitDelay-500*time.Millisecond || elapsed > WaitDelay+3*time.Second {
+		t.Fatalf("Run took %s; want about WaitDelay (%s)", elapsed, WaitDelay)
+	}
+}

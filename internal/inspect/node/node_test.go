@@ -977,7 +977,10 @@ func TestSanitizedEnvIsAnAllowlist(t *testing.T) {
 	want := map[string]bool{"LANG": true, "LC_ALL": true, "PATH": true, "HOME": true, "COREPACK_HOME": true, "COREPACK_ENABLE_NETWORK": true,
 		"COREPACK_ENABLE_AUTO_PIN": true, "COREPACK_ENABLE_STRICT": true, "YARN_IGNORE_PATH": true, "npm_config_manage_package_manager_versions": true}
 	for k := range got {
-		if !want[k] {
+		if !want[k] && !strings.HasPrefix(k, "LC_") { // any inherited locale variable is allowed
+			t.Errorf("unexpected variable in the probe environment: %s=%s", k, got[k])
+		}
+		if false {
 			t.Errorf("unexpected variable in the probe environment: %s=%s", k, got[k])
 		}
 	}

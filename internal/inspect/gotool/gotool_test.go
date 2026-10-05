@@ -148,7 +148,7 @@ func TestGoEnvForcesToolchainLocalAndHome(t *testing.T) {
 func TestRealGoCommandReportsItsVersionAndWritesNothing(t *testing.T) {
 	goBin, err := exec.LookPath("go")
 	if err != nil {
-		t.Skip("no go command on PATH")
+		skipOrFailInCI(t, "no go command on PATH")
 	}
 	goBin, _ = filepath.EvalSymlinks(goBin)
 	want, err := exec.Command(goBin, "env", "GOVERSION").Output()
@@ -199,4 +199,46 @@ func listFiles(t *testing.T, root string) []string {
 		return nil
 	})
 	return out
+}
+
+// The PRODUCTION constructor: the probe runs from "/" and with the
+// account's home — never $HOME, never a temp dir — whatever the parent
+// environment says.
+func TestProductionInspectorRunsFromRootWithTheAccountHome(t *testing.T) {
+	t.Setenv("HOME", "/evil/project")
+	t.Setenv("USER", "ci")
+	dir := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "seen")
+	if err := os.WriteFile(filepath.Join(dir, "go"), []byte("#!/bin/sh\n{ echo \"pwd=$(pwd)\"; echo \"HOME=$HOME\"; } > '"+marker+"'\necho 'go version go1.24.7 linux/amd64'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r, err := toolpath.New(toolpath.Config{ExplicitDirs: []string{dir}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	obs, err := NewGoInspectorWith(r).Inspect(context.Background(), core.Requirement{Name: "go"})
+	if err != nil || obs.Version != "1.24.7" {
+		t.Fatalf("%+v, %v", obs, err)
+	}
+	data, _ := os.ReadFile(marker)
+	seen := string(data)
+	if !strings.Contains(seen, "pwd=/\n") {
+		t.Errorf("the probe did not run from /:\n%s", seen)
+	}
+	if want := "HOME=" + probe.AccountHome() + "\n"; !strings.Contains(seen, want) || strings.Contains(seen, "/evil") {
+		t.Errorf("HOME is not the account home (want %q):\n%s", want, seen)
+	}
+	if NewGoInspector() == nil || !NewGoInspector().Supports("go") {
+		t.Error("NewGoInspector")
+	}
+}
+
+// In CI the real go command is the oracle: a missing one must fail the
+// run, not silently skip the tests that compare against it.
+func skipOrFailInCI(t *testing.T, why string) {
+	t.Helper()
+	if os.Getenv("CI") != "" {
+		t.Fatalf("%s (CI must have the go command)", why)
+	}
+	t.Skip(why)
 }

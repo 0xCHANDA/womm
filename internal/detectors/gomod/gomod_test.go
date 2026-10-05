@@ -63,20 +63,23 @@ func TestDetectNoDeclarationIsNotAnError(t *testing.T) {
 // The toolchain directive is a suggestion for GOTOOLCHAIN=auto, not a
 // requirement; it must not produce one, conflict with, or raise the go line.
 func TestDetectIgnoresTheToolchainDirective(t *testing.T) {
-	for _, gm := range []string{
-		"module m\ngo 1.21\ntoolchain go1.99.0\n",
-		"module m\ntoolchain go1.99.0\ngo 1.21\n",
-		"module m\ngo 1.24.0\ntoolchain go1.20.0\n",
-		"module m\ngo 1.21\ntoolchain default\n",
-		"module m\ngo 1.21\ntoolchain bogus\n",
+	for gm, want := range map[string]string{
+		"module m\ngo 1.21\ntoolchain go1.99.0\n":   ">=1.21",
+		"module m\ntoolchain go1.99.0\ngo 1.21\n":   ">=1.21",
+		"module m\ngo 1.24.0\ntoolchain go1.20.0\n": ">=1.24.0",
+		"module m\ngo 1.21\ntoolchain default\n":    ">=1.21",
+		"module m\ngo 1.21\ntoolchain bogus\n":      ">=1.21",
 	} {
 		reqs, err := detect(t, gm)
-		if err != nil || len(reqs) != 1 || reqs[0].Constraint != ">=1.21" && reqs[0].Constraint != ">=1.24.0" {
-			t.Errorf("%q: %+v, %v", gm, reqs, err)
+		if err != nil || len(reqs) != 1 || reqs[0].Constraint != want || len(reqs[0].Evidence) != 1 || reqs[0].Evidence[0].Field != "go" {
+			t.Errorf("%q: %+v, %v; want only the go line as %s", gm, reqs, err, want)
 		}
-		if err == nil && len(reqs[0].Evidence) != 1 {
-			t.Errorf("%q: evidence must name only the go line: %+v", gm, reqs[0].Evidence)
-		}
+	}
+}
+
+func TestDetectorName(t *testing.T) {
+	if New().Name() != "go" {
+		t.Errorf("Name = %q", New().Name())
 	}
 }
 
@@ -103,6 +106,9 @@ func TestDetectRefusesAmbiguousOrMalformedGoDirectives(t *testing.T) {
 		"unterminated string": "module m\nrequire \"a\ngo 1.21\n",
 		"unterminated raw":    "module m\nrequire `a\ngo 1.21\n",
 		"unterminated block":  "module m\nrequire (\na v1.0.0\ngo 1.21\n",
+		"newline in string":   "module m\nrequire \"a\n\"\ngo 1.21\n",
+		"newline in raw":      "module m\nrequire `a\n`\ngo 1.21\n",
+		"quote glued to word": "module m\ngo\"1.21\"\ngo 1.22\n",
 		"comma after verb":    "module m\ngo 1.21\ngo,\n",
 		"bracket after verb":  "module m\ngo 1.21\ngo]\n",
 		"brace splits args":   "module m\ngo{ 1.21\ngo 1.22\n",
@@ -133,6 +139,11 @@ func TestDetectOnlyReadsDepthZeroStatements(t *testing.T) {
 		{"module \"go 1.99\"\n", ""},
 		{"module m\nreplace a => ./go\ngo 1.24\n", "1.24"},
 		{"module m\r\ngo 1.21\r\n", "1.21"},
+		{"module \"a\\\"b\"\ngo 1.21\n", "1.21"},                  // an escaped quote inside a string
+		{"module m\ngo 1.21// glued comment\n", "1.21"},           // a comment may touch the word
+		{"module m\nrequire(\n\tgo v1.0.0\n)\ngo 1.22\n", "1.22"}, // `require(` is a block opener
+		{"module m\nGO 1.21\n", ""},                               // verbs are case-sensitive
+		{"module m\nGo 1.99\ngo 1.21\n", "1.21"},
 		{"module m\n\tgo\t1.21\t// c\n", "1.21"},
 		{"module m\n// go 1.99\ngo 1.21\n", "1.21"},
 	}
@@ -199,6 +210,9 @@ func goOracle(t *testing.T, gomod string) (version string, ok bool, why string) 
 
 func TestDifferentialAgainstTheGoCommand(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("no go command (CI must have it: it is the oracle)")
+		}
 		t.Skip("no go command to compare against")
 	}
 	n, seed := 400, int64(1)
@@ -219,7 +233,8 @@ func TestDifferentialAgainstTheGoCommand(t *testing.T) {
 		"require (\n\tgo v1.0.0\n)", "replace a/b => ./b", "exclude a/b v1.0.0", "retract v1.0.0 // go 1.99", "retract \"v1.0.0\"",
 		"godebug default=go1.21", "godebug (\n\tpanicnil=1\n)", "/* c */", "require `a/b\nc` v1.0.0", "require \"a/b v1.0.0", "go 1.50", "toolchain",
 		"exclude ( v1.0.0", "exclude ) v1.0.1", "exclude (\n\tgo 1.99\n)", "exclude (\n\ta/b v1.0.0\n\tgo 1.98 )\ngo 1.97", "retract [v1.0.0, v1.0.1]", "retract (\n\t[v1.0.0, v1.0.1]\n\tv1.2.0 // why\n)",
-		"go,", "go]", "go[", "go{ 1.21", "go} 1.22", "go, 1.21", "go ,1.21", "go 1.21,", "go (", "go (\n1.21\n)", "go ( 1.21 )", "go(1.21)", "replace x => y // go 1.5", "require (\n\ta v1.0.0 )\n)", "( go 1.99", ") go 1.99", "exclude {\n\tgo 1.99\n}", "exclude [ ( v1", "exclude ] ) v2"}
+		"go,", "go]", "go[", "go{ 1.21", "go} 1.22", "go, 1.21", "go ,1.21", "go 1.21,", "go (", "go (\n1.21\n)", "go ( 1.21 )", "go(1.21)", "replace x => y // go 1.5", "require (\n\ta v1.0.0 )\n)", "( go 1.99", ") go 1.99", "exclude {\n\tgo 1.99\n}", "exclude [ ( v1", "exclude ] ) v2",
+		"module \"a\\\"b\"", "go 1.21// c", "go 1.21//c", "require(\n\tgo v1.0.0\n)", "require \"a\n\"", "GO 1.21", "Go 1.21", "go\"1.21\"", "require `a\n`"}
 	var tried, bothOK int
 	for i := 0; i < n; i++ {
 		var lines []string
@@ -253,13 +268,16 @@ func TestDifferentialAgainstTheGoCommand(t *testing.T) {
 // the go directive (as opposed to any other line of the file).
 func aboutGoDirective(msg string) bool {
 	for _, line := range strings.Split(msg, "\n") {
-		for _, k := range []string{"invalid go version", "go directive", "repeated go statement"} {
+		for _, k := range []string{"invalid go version", "go directive", "repeated go statement", "unexpected newline in string", "unterminated"} {
 			if strings.Contains(line, k) {
 				return true
 			}
 		}
-		// "unknown block type: go" exactly (not "...: gorequire").
-		if strings.HasSuffix(strings.TrimSpace(line), "unknown block type: go") {
+		line = strings.TrimSpace(line)
+		// "unknown block type: go" exactly (not "...: gorequire"). An
+		// unknown directive such as `GO` is not a disagreement about how
+		// the go directive reads: WOMM ignores it (pinned by a unit test).
+		if strings.HasSuffix(line, "unknown block type: go") {
 			return true
 		}
 	}
@@ -338,6 +356,9 @@ func checkAgainstGo(t *testing.T, gm string) (ok bool) {
 func TestDifferentialMutatedRealGoMod(t *testing.T) {
 	goBin, err := exec.LookPath("go")
 	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("no go command (CI must have it: it is the oracle)")
+		}
 		t.Skip("no go command to compare against")
 	}
 	out, err := exec.Command(goBin, "env", "GOROOT").Output()

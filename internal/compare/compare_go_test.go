@@ -99,6 +99,9 @@ func TestCompareGrammarIsChosenByRequirementName(t *testing.T) {
 func TestCompareGoAgreesWithTheGoCommandOnItsOwnVersion(t *testing.T) {
 	goBin, err := exec.LookPath("go")
 	if err != nil {
+		if os.Getenv("CI") != "" {
+			t.Fatal("no go command (CI must have it: it is the oracle)")
+		}
 		t.Skip("no go command")
 	}
 	vout, err := exec.Command(goBin, "env", "GOVERSION").Output()
@@ -157,4 +160,36 @@ func TestCompareGoAgreesWithTheGoCommandOnItsOwnVersion(t *testing.T) {
 		t.Fatalf("only %d checked / %d decided; the matrix is not exercising anything", checked, accepted)
 	}
 	t.Logf("%d versions compared against the go command, %d decided by WOMM", checked, accepted)
+}
+
+func TestCompareGoReasonsAndPrecedence(t *testing.T) {
+	reasons := map[string]string{}
+	for name, c := range map[string]struct {
+		constraint, version string
+		present             bool
+	}{
+		"pass":     {">=1.21", "1.22.0", true},
+		"fail":     {">=1.22", "1.21.0", true},
+		"absent":   {">=1.22", "", false},
+		"unknown":  {">=1.22", "", true},
+		"badobs":   {">=1.22", "devel", true},
+		"badconst": {"1.22", "1.22.0", true},
+	} {
+		m, _ := goMatch(c.constraint, c.version, c.present)
+		reasons[name] = m.Reason
+	}
+	want := map[string]string{
+		"pass": "observed version satisfies the requirement", "fail": "observed version does not satisfy the requirement",
+		"absent": "required target is absent", "unknown": "target is present but its version is unknown",
+		"badobs": "observed version is invalid", "badconst": "requirement constraint is invalid",
+	}
+	for k, w := range want {
+		if reasons[k] != w {
+			t.Errorf("%s: reason %q, want %q", k, reasons[k], w)
+		}
+	}
+	// An invalid constraint is never decided, not even for an absent target.
+	if m, err := goMatch("go1.22", "", false); m.Status != core.StatusUnknown || !errors.Is(err, ErrInvalidConstraint) {
+		t.Errorf("absent + invalid constraint: %q, %v; want unknown + ErrInvalidConstraint", m.Status, err)
+	}
 }

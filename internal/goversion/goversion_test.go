@@ -1,6 +1,9 @@
 package goversion
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValid(t *testing.T) {
 	for _, v := range []string{"1.0", "1.20", "1.21", "1.21.0", "1.21.3", "1.21rc1", "1.22rc2", "1.23beta1", "1.9alpha1", "1.100.7", "2.0"} {
@@ -20,6 +23,10 @@ func TestValid(t *testing.T) {
 	}
 	if Valid(long) {
 		t.Error("an over-long version was accepted")
+	}
+	at64 := "1." + strings.Repeat("9", 62) // 64 bytes: the limit itself is allowed
+	if !Valid(at64) || Valid(at64+"9") {
+		t.Errorf("64-byte boundary: Valid(64)=%v Valid(65)=%v", Valid(at64), Valid(at64+"9"))
 	}
 }
 
@@ -93,7 +100,7 @@ func TestParseVersionOutput(t *testing.T) {
 	for _, in := range []string{
 		"", "\n", "go version devel go1.25-abc123 Mon Jan 1 linux/amd64", "go version go1.21.0-bigcorp linux/amd64",
 		"go version go1 linux/amd64", "go version 1.21.0 linux/amd64", "go version go1.21.0", "go version go1.21.0 linux",
-		"go version go1.21.0 linux/amd64\nextra", "go version go1.21.0 linux/amd64 extra", "go version go1.21.0 X:a X:b linux/amd64",
+		"go version go1.21.0 linux/amd64\nextra", "go foo go1.21.0 linux/amd64", "   \n  \n", "go version go1.21.0 linux/amd64 extra", "go version go1.21.0 X:a X:b linux/amd64",
 		"version go1.21.0 linux/amd64", "go: command not found", "go version go1.21.0rc1 linux/amd64", "go version go1.21.0 Y:boringcrypto linux/amd64",
 	} {
 		if got, o := ParseVersionOutput(in); o {
