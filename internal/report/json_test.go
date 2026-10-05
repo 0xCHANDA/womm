@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/0xCHANDA/womm/internal/core"
@@ -406,4 +408,94 @@ func FuzzRenderJSON(f *testing.F) {
 			t.Fatalf("raw CR in output: %q", a.String())
 		}
 	})
+}
+
+// Characters encoding/json leaves raw but a terminal acts on: C1 (CSI),
+// DEL, bidi overrides, zero-width and tag characters. They are escaped in
+// the document and still round-trip exactly.
+func TestRenderJSONEscapesTerminalActiveCharacters(t *testing.T) {
+	values := []string{"c1\u009bcsi", "nel\u0085", "del\x7f", "bidi\u202eevil", "zw\u200bx", "bom\ufeffx", "tag\U000E0001x", "lrm\u200e"}
+	for _, v := range values {
+		raw := renderJSON(t, JSONDocument{Result: "pass", Matches: []core.Match{
+			match("node", ">=1", core.Observation{Present: true, Version: "1.0.0", Path: "/p/" + v}, core.StatusPass, v, ev(v, v, v)),
+		}})
+		for _, r := range string(raw) {
+			if r == 0x7f || (r >= 0x80 && r <= 0x9f) || unicode.Is(unicode.Cf, r) {
+				t.Errorf("%q: raw U+%04X reached the output:\n%s", v, r, raw)
+			}
+		}
+		var d struct {
+			Requirements []struct {
+				Reason      string
+				Observation struct{ Path string }
+			}
+		}
+		if err := json.Unmarshal(raw, &d); err != nil {
+			t.Fatalf("%q: %v", v, err)
+		}
+		if d.Requirements[0].Reason != v || d.Requirements[0].Observation.Path != "/p/"+v {
+			t.Errorf("%q did not round-trip: %+v", v, d.Requirements[0])
+		}
+	}
+}
+
+// One U+FFFD per invalid byte: two different byte strings must not
+// collapse into the same text.
+func TestRenderJSONReplacesEachInvalidByte(t *testing.T) {
+	for in, want := range map[string]string{"a\xffb": "a\ufffdb", "a\xff\xfe\xfdb": "a\ufffd\ufffd\ufffdb", "\xc3": "\ufffd", "ok": "ok"} {
+		if got := text(in); got != want {
+			t.Errorf("text(%q) = %q, want %q", in, got, want)
+		}
+	}
+	a := string(renderJSON(t, JSONDocument{Result: "pass", Matches: []core.Match{match("n", "x\xff\xfe", core.Observation{}, core.StatusFail, "r")}}))
+	b := string(renderJSON(t, JSONDocument{Result: "pass", Matches: []core.Match{match("n", "x\xff", core.Observation{}, core.StatusFail, "r")}}))
+	if a == b {
+		t.Error("different invalid byte runs rendered identically")
+	}
+}
+
+// A failure to write the document is an error, never swallowed (the CLI
+// turns it into a non-zero exit even for a FAIL verdict).
+func TestRenderJSONPropagatesWriteErrors(t *testing.T) {
+	sentinel := errors.New("write failed")
+	if err := RenderJSON(failingWriter{sentinel}, jsonScenarios()["pass"]); !errors.Is(err, sentinel) {
+		t.Fatalf("error = %v, want the writer's error", err)
+	}
+}
+
+func TestRenderJSONUnknownStatusIsErrUnknownStatus(t *testing.T) {
+	err := RenderJSON(&bytes.Buffer{}, JSONDocument{Matches: []core.Match{{Requirement: core.Requirement{Name: "x"}, Status: "weird"}}})
+	if !errors.Is(err, ErrUnknownStatus) {
+		t.Fatalf("error = %v, want ErrUnknownStatus", err)
+	}
+}
+
+// The UTF-8 repair applies to EVERY string field, and an absent tool
+// that nevertheless has a path keeps it (host evidence is never hidden).
+func TestRenderJSONRepairsEveryStringField(t *testing.T) {
+	bad := "x\xffy"
+	m := match(bad, bad, core.Observation{Present: false, Version: bad, Path: bad}, core.StatusUnknown, bad, ev(bad, bad, bad))
+	raw := renderJSON(t, JSONDocument{Result: "inconclusive", ExitCode: 3, Matches: []core.Match{m}, Diagnostics: []Diagnostic{{Kind: bad, Message: bad}}})
+	var d struct {
+		Requirements []struct {
+			Name, Constraint, Reason string
+			Observation              struct{ Version, Path *string }
+			Evidence                 []struct{ Source, Field, Value string }
+		}
+		Errors []struct{ Kind, Message string }
+	}
+	if err := json.Unmarshal(raw, &d); err != nil {
+		t.Fatal(err)
+	}
+	want := "x�y"
+	r := d.Requirements[0]
+	got := []string{r.Name, r.Constraint, r.Reason, *r.Observation.Version, *r.Observation.Path, r.Evidence[0].Source, r.Evidence[0].Field, r.Evidence[0].Value, d.Errors[0].Kind, d.Errors[0].Message}
+	for i, g := range got {
+		if g != want {
+			t.Errorf("field %d = %q, want %q", i, g, want)
+		}
+	}
+	if strings.Contains(string(raw), "\\ufffd") || !strings.Contains(string(raw), "x\ufffdy") {
+		t.Errorf("replacement should be written as the character itself, not an escape:\n%s", raw)
+	}
 }

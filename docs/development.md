@@ -87,6 +87,8 @@ go test -run '^$' -fuzz '^FuzzParse$' -fuzztime 30s ./internal/semverrange/
 go test -run '^$' -fuzz '^FuzzPackageJSON$' -fuzztime 30s ./internal/detectors/node/
 go test -run '^$' -fuzz '^FuzzCompare$' -fuzztime 30s ./internal/compare/
 go test -run '^$' -fuzz '^FuzzRender$' -fuzztime 30s ./internal/report/
+go test -run '^$' -fuzz '^FuzzRenderJSON$' -fuzztime 30s ./internal/report/
+go test -run '^$' -fuzz '^FuzzRenderPath$' -fuzztime 30s ./internal/report/
 ```
 
 A crasher lands in `testdata/fuzz/<Target>/`; commit it with the fix.

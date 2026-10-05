@@ -287,3 +287,63 @@ func TestVerifyFormatJSONWithRealInspector(t *testing.T) {
 		t.Errorf("document = %+v, want one pass at %s", doc, node)
 	}
 }
+
+type brokenWriter struct{}
+
+func (brokenWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+
+// If the report cannot be written the command must not exit 0 — not even
+// when the verdict would have been a FAIL (1) or a PASS (0).
+func TestVerifyWriteFailureIsNeverExitZero(t *testing.T) {
+	useInspector(t, stubInspector{obs: map[string]core.Observation{
+		"node": {Name: "node", Present: true, Version: "24.7.0"}, "pnpm": {Name: "pnpm", Present: true, Version: "10.15.1"}}})
+	dir := t.TempDir()
+	writeWomm(t, dir, twoReqs)
+	for _, args := range [][]string{{"verify", dir}, {"verify", dir, "--format", "json"}} {
+		var errb bytes.Buffer
+		code := run(context.Background(), args, brokenWriter{}, &errb)
+		if code != 3 || !strings.Contains(errb.String(), "broken pipe") {
+			t.Errorf("%v: exit %d stderr %q; want exit 3 and the write error", args, code, errb.String())
+		}
+	}
+}
+
+// Several operational errors: count, order and text are exactly what
+// stderr says, one `error:` line each.
+func TestVerifyFormatJSONErrorsAreOrderedAndMatchStderrExactly(t *testing.T) {
+	useInspector(t, stubInspector{obs: map[string]core.Observation{}})
+	dir := t.TempDir()
+	writeWomm(t, dir, "version: 1\nservices:\n  zzz: {version: '1'}\n  bbb: {version: '7'}\nrequirements:\n"+
+		"  - {name: aaa, constraint: present, evidence: [{source: a, field: b, value: c}]}\n")
+	hCode, _, hErr := runCLI(t, "verify", dir)
+	jCode, jOut, jErr := runCLI(t, "verify", dir, "--format", "json")
+	doc := decodeJSONOnly(t, jOut)
+	if hCode != 3 || jCode != 3 || hErr != jErr || len(doc.Errors) != 3 {
+		t.Fatalf("exit %d/%d, %d errors\nstderr %q", hCode, jCode, len(doc.Errors), jErr)
+	}
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSuffix(jErr, "\n"), "\n") {
+		lines = append(lines, strings.TrimPrefix(l, "error: "))
+	}
+	for i, e := range doc.Errors {
+		if e.Message == "" || e.Message != lines[i] || e.Kind != "unsupported_requirement" {
+			t.Errorf("errors[%d] = %+v, want kind unsupported_requirement and message %q", i, e, lines[i])
+		}
+	}
+	// Documented order: services by name, environment, then requirements by name.
+	if !strings.Contains(doc.Errors[0].Message, `"bbb"`) || !strings.Contains(doc.Errors[1].Message, `"zzz"`) || !strings.Contains(doc.Errors[2].Message, `"aaa"`) {
+		t.Errorf("order = %q", []string{doc.Errors[0].Message, doc.Errors[1].Message, doc.Errors[2].Message})
+	}
+}
+
+// A bad --format is a usage error before anything else is looked at: a
+// missing or malformed womm.yaml must not take precedence.
+func TestVerifyBadFormatBeatsMissingOrMalformedFile(t *testing.T) {
+	missing, bad := t.TempDir(), t.TempDir()
+	writeWomm(t, bad, "version: 1\nrequirements: [unclosed\n")
+	for _, dir := range []string{missing, bad} {
+		if code, out, errb := runCLI(t, "verify", dir, "--format", "bogus"); code != 2 || out != "" || !strings.Contains(errb, `"--format"`) {
+			t.Errorf("exit %d stdout %q stderr %q; want a usage error", code, out, errb)
+		}
+	}
+}

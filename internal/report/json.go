@@ -3,8 +3,12 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
+	"unicode"
+	"unicode/utf16"
+	"unicode/utf8"
 
 	"github.com/0xCHANDA/womm/internal/core"
 )
@@ -140,12 +144,53 @@ func RenderJSON(w io.Writer, doc JSONDocument) error {
 	if err := enc.Encode(out); err != nil {
 		return err
 	}
-	_, err = w.Write(buf.Bytes())
+	_, err = w.Write(escapeUnsafe(buf.Bytes()))
 	return err
 }
 
-// text makes s valid UTF-8; encoding/json would do the same silently.
-func text(s string) string { return strings.ToValidUTF8(s, "�") }
+// text makes s valid UTF-8: every invalid byte becomes one U+FFFD, so
+// two different byte strings never collapse into the same text because
+// of a run length.
+func text(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		if r == utf8.RuneError && size == 1 {
+			b.WriteRune(utf8.RuneError)
+		} else {
+			b.WriteString(s[i : i+size])
+		}
+		i += size
+	}
+	return b.String()
+}
+
+// escapeUnsafe rewrites, inside an encoded document, every character
+// that encoding/json leaves raw but that can drive a terminal or reorder
+// text when someone cats the output: DEL, the C1 controls (U+0080-U+009F,
+// which include CSI) and Unicode format characters (bidi overrides,
+// zero-width and tag characters). JSON structure is pure ASCII, so these
+// can only occur inside strings, where \uXXXX is equivalent.
+func escapeUnsafe(in []byte) []byte {
+	var out bytes.Buffer
+	for i := 0; i < len(in); {
+		r, size := utf8.DecodeRune(in[i:])
+		if unicode.Is(unicode.Cf, r) || (r >= 0x7f && r <= 0x9f) {
+			if r1, r2 := utf16.EncodeRune(r); r1 != unicode.ReplacementChar {
+				fmt.Fprintf(&out, "\\u%04x\\u%04x", r1, r2)
+			} else {
+				fmt.Fprintf(&out, "\\u%04x", r)
+			}
+		} else {
+			out.Write(in[i : i+size])
+		}
+		i += size
+	}
+	return out.Bytes()
+}
 
 // optional maps the empty string to null: "unknown" and "none" are
 // states, not empty values.

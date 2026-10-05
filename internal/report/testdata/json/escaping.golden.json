@@ -7,7 +7,7 @@
       "name": "nöde\"x\\",
       "constraint": "<=1 && >2 <3",
       "status": "unknown",
-      "reason": "tab\there\u2028sep\u0000nul�invalid-utf8 ✓",
+      "reason": "tab\there\u2028sep\u0000nul��invalid-utf8 ✓",
       "observation": {
         "present": true,
         "version": "1.0.0",
