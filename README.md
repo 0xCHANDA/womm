@@ -7,9 +7,11 @@ works on my machine" into a report: it discovers what a project
 **requires** from explicit declarations, observes what a machine
 **actually has**, and compares the two with the evidence attached.
 
-**Status: v0.1 vertical slice — Linux + Node.js.** `capture` and
-`verify` work end to end for `node`, `npm`, `pnpm` and `yarn`. No
-release is tagged yet; see [CHANGELOG.md](CHANGELOG.md).
+**Status: v0.1 vertical slice — Linux + Node.js** on `main`. No
+release is tagged yet; see [CHANGELOG.md](CHANGELOG.md). The
+`integration/v0.2` branch (not released) adds version-managed Node
+(`--tool-dir`), `--format json` and a second ecosystem, Go (`go.mod` →
+`go version`); this README describes that branch.
 
 ## What WOMM is not
 
@@ -17,7 +19,8 @@ release is tagged yet; see [CHANGELOG.md](CHANGELOG.md).
   anything on the machine.
 - **Not a project-code executor.** It never runs a project's scripts
   or lifecycle hooks. The only processes it starts are fixed
-  `<tool> --version` probes of system binaries.
+  version probes (`<tool> --version`, `go version`) of resolved
+  system or user-named binaries.
 - **Not a guessing tool.** Ambiguous, conflicting or unsupported
   declarations are explicit errors, never silently interpreted.
 
@@ -57,6 +60,22 @@ Reads only explicit declarations inside the project root:
 | `package.json` | `engines.node` | `node` range (npm range grammar) |
 | `.nvmrc` | exact `x.y.z` / `vx.y.z` (nvm comment and `KEY=value` rules) | `node` exact version |
 | `package.json` | `packageManager` | `npm` / `pnpm` / `yarn` exact version (Corepack `+sha1/sha224/sha512.<hex>` validated and stripped) |
+| `go.mod` | `go` directive | `go` minimum version, written `>=1.24.1` (Go's own version syntax and order, not semver) |
+
+Go: only the `go` directive of `go.mod` is read — static, no `go list`, no
+module download. It is a *minimum* (the go command refuses to run when
+older, with `GOTOOLCHAIN=local`). The `toolchain` directive is **not** a
+requirement: it only suggests a toolchain to `GOTOOLCHAIN=auto` switching
+(verified with the go command: `go 1.21` + `toolchain go1.99.0` builds on
+an older local toolchain), so it is ignored. Go versions are not semver —
+`1.21 < 1.21rc1 < 1.21.0`, so Go 1.21rc1 satisfies `go 1.21` but not
+`go 1.21.0` — and are compared with the standard library's `go/version`.
+A repeated, block-form, quoted or otherwise malformed `go` line is an
+explicit error. `verify` probes `go version` with `GOTOOLCHAIN=local`,
+`GOENV=off`, no inherited `GOFLAGS`, and Go's telemetry redirected (since
+Go 1.23 even `go version` writes counter files under `~/.config/go`); a
+Go installed from the official tarball lives in `/usr/local/go/bin`, which
+is not a system directory: pass it with `--tool-dir`.
 
 `engines.node` and `.nvmrc` together must agree: the exact `.nvmrc`
 version must satisfy the `engines` range, and the result is that exact

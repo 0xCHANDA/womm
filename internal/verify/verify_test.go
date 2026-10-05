@@ -61,7 +61,7 @@ func TestVerifyMapsEveryOutcome(t *testing.T) {
 		"yarn": {obs: core.Observation{Name: "yarn", Present: true}},                           // UNKNOWN (version unknown)
 		"bun":  {obs: core.Observation{Name: "bun", Present: true}, err: errProbe},             // UNREACHABLE
 		"deno": {obs: core.Observation{Name: "deno", Present: true, Version: "not-a-version"}}, // UNKNOWN + compare error
-		"go":   {obs: core.Observation{Name: "go", Present: true, Version: "24.7.0-beta.1"}},   // UNKNOWN + prerelease
+		"php":  {obs: core.Observation{Name: "php", Present: true, Version: "24.7.0-beta.1"}},  // UNKNOWN + prerelease
 	}}
 	f := file(
 		req("yarn", "present"),
@@ -70,14 +70,14 @@ func TestVerifyMapsEveryOutcome(t *testing.T) {
 		req("pnpm", "10.15.1"),
 		req("bun", ">=1"),
 		req("deno", ">=2"),
-		req("go", ">=22"),
+		req("php", ">=22"),
 	)
 	// "present" on yarn: present → PASS; make it version-dependent instead.
 	f.Requirements[0] = req("yarn", ">=4")
 
 	res := Verify(context.Background(), f, []inspect.Inspector{insp})
 
-	wantOrder := []string{"bun", "deno", "go", "node", "npm", "pnpm", "yarn"}
+	wantOrder := []string{"bun", "deno", "node", "npm", "php", "pnpm", "yarn"}
 	var gotOrder []string
 	for _, m := range res.Matches {
 		gotOrder = append(gotOrder, m.Requirement.Name)
@@ -88,9 +88,9 @@ func TestVerifyMapsEveryOutcome(t *testing.T) {
 	want := []core.MatchStatus{
 		core.StatusUnreachable, // bun
 		core.StatusUnknown,     // deno
-		core.StatusUnknown,     // go
 		core.StatusPass,        // node
 		core.StatusFail,        // npm
+		core.StatusUnknown,     // php
 		core.StatusFail,        // pnpm
 		core.StatusUnknown,     // yarn
 	}
@@ -116,7 +116,7 @@ func TestVerifyMapsEveryOutcome(t *testing.T) {
 	if !errors.Is(res.Errors[0], compare.ErrInvalidObservedVersion) || !strings.HasPrefix(res.Errors[0].Error(), "deno: ") {
 		t.Errorf("errors[0] = %v", res.Errors[0])
 	}
-	if !errors.Is(res.Errors[1], compare.ErrPrereleaseRange) || !strings.HasPrefix(res.Errors[1].Error(), "go: ") {
+	if !errors.Is(res.Errors[1], compare.ErrPrereleaseRange) || !strings.HasPrefix(res.Errors[1].Error(), "php: ") {
 		t.Errorf("errors[1] = %v", res.Errors[1])
 	}
 	if ExitCode(res) != ExitInconclusive {

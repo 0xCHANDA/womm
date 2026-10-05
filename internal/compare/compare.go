@@ -102,6 +102,11 @@ func Compare(req core.Requirement, obs core.Observation) (core.Match, error) {
 		return match, nil
 	}
 
+	if req.Name == goName {
+		// Go versions are not semver: see compare_go.go.
+		return compareGo(match, req, obs)
+	}
+
 	normalized, err := semverrange.Normalize(req.Constraint)
 	if err != nil {
 		match.Status = core.StatusUnknown

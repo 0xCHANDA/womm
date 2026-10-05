@@ -28,6 +28,11 @@ comparison is pure logic; reporting is presentation only.
 | `internal/detectors/node` | L0 | merged (PR 2) | `NodeDetector` (package.json `engines.node` + `.nvmrc`, conflict-safe) and `PackageManagerDetector` (`packageManager`, Corepack hash subset) |
 | `internal/inspect` | L1 | merged (PR 3, 8) | `Inspector` boundary: demand-driven machine observation → `core.Observation`; partial `Observation{Present: true}` next to a probe error |
 | `internal/inspect/toolpath` | L1 | integration/v0.2 | `Resolver`: ordered, validated search list (explicit `--tool-dir` directories, the system allowlist, then the account's version-manager shim directories) → absolute executable path; refuses project-controlled directories and symlinks into the project; never the inherited `PATH`; also owns `AccountHome()` (user database, never `$HOME`) |
+| `internal/inspect/probe` | L1 | integration/v0.2 | the one place a probe process is started: own process group, timeout then group SIGKILL then WaitDelay, 4 KiB output cap, child subreaper that adopts and kills `setsid` escapees, fixed args, allowlisted environment (`Env`, `PathFor`); shared by every ecosystem |
+| `internal/inspect/gotool` | L1 | integration/v0.2 | `GoInspector`: `go version` with `GOTOOLCHAIN=local`, `GOENV=off`, telemetry redirected; version parsed strictly (a development build is unknown) |
+| `internal/goversion` | logic | integration/v0.2 | Go version syntax (strict gate) and order on top of `go/version` — not semver |
+| `internal/detectors/gomod` | L0 | integration/v0.2 | the `go` directive of `go.mod` → `Requirement{go, ">=V"}`; lexer follows the go command's reader; differential-tested against it |
+| `internal/detectors/source` | L0 | integration/v0.2 | the one contained (`os.Root`), non-blocking, size-bounded read of a declared source, shared by every detector |
 | `internal/inspect/node` | L1 | merged (PR 3) | `NodeInspector`: node/npm/pnpm/yarn `--version` probes with full L1 containment |
 | `internal/semverrange` | logic | merged (PR 10) | npm range grammar gate over Masterminds/semver: rejects `,`, `!=`, `=>`, `=<`, `~>`, empty sets, qualifiers on wildcards; normalizes whitespace |
 | `internal/compare` | logic | merged (PR 4) | pure `Compare(req, obs) → core.Match`; exact versions by equality, ranges for release versions only, prerelease-vs-range refused |
@@ -133,7 +138,8 @@ deliberate v0.1 limitations (`docs/roadmap.md`, `CHANGELOG.md`):
    and visible in the report as what was actually observed. (On
    `integration/v0.2`, `--tool-dir` names extra directories; see
    `docs/proposals/version-managers.md`.)
-3. Only the Node.js ecosystem has a detector and an inspector.
+3. On `main`, only the Node.js ecosystem has a detector and an inspector
+   (`integration/v0.2` adds Go).
 
 ## Security invariants (invariant — do not weaken)
 

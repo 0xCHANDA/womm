@@ -21,20 +21,16 @@
 package node
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/Masterminds/semver/v3"
 
 	"github.com/0xCHANDA/womm/internal/core"
+	"github.com/0xCHANDA/womm/internal/inspect/probe"
 	"github.com/0xCHANDA/womm/internal/inspect/toolpath"
 )
 
@@ -51,7 +47,7 @@ var ErrUnsupportedTool = errors.New("unsupported tool for NodeInspector")
 
 // ErrProbeTimeout marks a version probe that exceeded probeTimeout.
 // The underlying process is killed; it never leaks past this error.
-var ErrProbeTimeout = errors.New("version probe timed out")
+var ErrProbeTimeout = probe.ErrTimeout
 
 // supportedTools are the only executable names this Inspector will
 // ever resolve and run. Requirement.Name must match one of these
@@ -63,21 +59,13 @@ var supportedTools = map[string]bool{
 	"yarn": true,
 }
 
+// The probe bounds live in internal/inspect/probe, shared by every
+// ecosystem; these aliases keep the names this package's docs and tests
+// use.
 const (
-	// probeTimeout bounds every version probe. A hanging binary must
-	// never hang WOMM.
-	probeTimeout = 5 * time.Second
-	// waitDelay bounds how long Wait may block on the output pipes
-	// after the process group was killed: a descendant that escaped
-	// the group (setsid) can keep the pipe open, and WOMM must still
-	// return. Such a process is then killed as an adopted child (see
-	// reaper_linux.go); either way it can never hold WOMM.
-	waitDelay = 2 * time.Second
-	// maxOutputBytes bounds captured stdout+stderr. Version output is
-	// untrusted; a broken or malicious binary must not be able to
-	// exhaust memory through it. A real version string is at most a
-	// few dozen bytes.
-	maxOutputBytes = 4096
+	probeTimeout   = probe.DefaultTimeout
+	waitDelay      = probe.WaitDelay
+	maxOutputBytes = probe.MaxOutputBytes
 )
 
 // NodeInspector inspects the machine for the Node.js ecosystem tools.
@@ -110,7 +98,7 @@ type NodeInspector struct {
 // previous choice and is wrong on both counts: /tmp is world-writable
 // and $TMPDIR is inherited verbatim (a relative value points into the
 // project).
-const probeDir = "/"
+const probeDir = probe.Dir
 
 // NewNodeInspector returns a NodeInspector configured for production
 // use over the system directories only: the filesystem root as the
@@ -175,70 +163,16 @@ func (n *NodeInspector) Inspect(ctx context.Context, req core.Requirement) (core
 // probe executes path with the fixed version-query argument and
 // returns its bounded combined output. It never uses a shell: the
 // resolved absolute path is executed directly, exactly the L1
-// contract requires.
+// contract requires. Containment (timeout, process group, subreaper,
+// output cap) is internal/inspect/probe.
 func (n *NodeInspector) probe(ctx context.Context, path string) (string, error) {
-	timeout := n.timeout
-	if timeout <= 0 {
-		timeout = probeTimeout
-	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	// path is only ever a value the resolver returned: an absolute path
-	// inside the validated directory list. Executed directly, with a
-	// fixed argument — no shell involved.
-	becomeSubreaper()
-	cmd := exec.CommandContext(ctx, path, "--version")
-	cmd.Dir = n.runDir
-	cmd.Env = sanitizedEnvFor(path)
-	cmd.Stdin = nil
-
-	// Run the probe in its own process group. If the resolved binary
-	// is itself a wrapper that forks a further process (a shim, an
-	// nvm/asdf launcher script, ...), signalling only the immediate
-	// child on timeout/cancellation would leave that descendant
-	// running — an orphan that keeps the output pipe open and hangs
-	// Wait() until it exits on its own, defeating the whole point of
-	// the timeout. Killing the negative PID kills the whole group.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-	}
-	// Belt and suspenders: even if the group kill above somehow fails
-	// to close every descendant's copy of the pipe, Wait must not
-	// block forever on it.
-	cmd.WaitDelay = waitDelay
-
-	out := &boundedWriter{limit: maxOutputBytes}
-	cmd.Stdout = out
-	cmd.Stderr = out
-
-	err := cmd.Run()
-	// The probe is reaped (and on failure its group killed). Whatever
-	// left the group (setsid) was orphaned by that and is now WOMM's
-	// own child: kill it, on the success path too — a probe must not
-	// leave processes behind. Best effort, bounded; the timeout
-	// guarantee above never depends on it.
-	killAdoptedDescendants()
-	if err == nil {
-		return out.buf.String(), nil
-	}
-	// cmd.Run failed: distinguish why. exec.CommandContext kills the
-	// process as soon as ctx is done, so a failure coinciding with an
-	// expired/cancelled context is that, not a genuine exec failure.
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return "", fmt.Errorf("%w after %s", ErrProbeTimeout, timeout)
-	}
-	if ctx.Err() != nil {
-		return "", fmt.Errorf("version probe cancelled: %w", ctx.Err())
-	}
-	// The binary exists (we resolved and started it) but failed to
-	// run to completion: a genuine execution failure, never
-	// reinterpreted as "missing".
-	return "", fmt.Errorf("version probe failed: %w", err)
+	return probe.Run(ctx, probe.Spec{
+		Path:    path,
+		Args:    []string{"--version"},
+		Dir:     n.runDir,
+		Env:     sanitizedEnvFor(path),
+		Timeout: n.timeout,
+	})
 }
 
 // sanitizedEnv builds the child process environment: the current
@@ -276,43 +210,10 @@ func sanitizedEnv() []string { return sanitizedEnvFor("") }
 // they would silently run on the system node (or fail to start). So
 // that directory, already validated by the resolver, goes first. System
 // binaries keep exactly the fixed system PATH.
-func sanitizedEnvFor(execPath string) []string {
-	env := os.Environ()
-	out := make([]string, 0, len(forcedEnv)+4)
-	for _, kv := range env {
-		key, _, _ := strings.Cut(kv, "=")
-		if key == "LANG" || key == "LANGUAGE" || strings.HasPrefix(key, "LC_") {
-			out = append(out, kv)
-		}
-	}
-	out = append(out, forcedEnv...)
-	return append(out, "PATH="+probePath(execPath))
-}
+func sanitizedEnvFor(execPath string) []string { return probe.Env(execPath, forcedEnv) }
 
-// probePath is the PATH of a probe: the executable's own directory when
-// it is not a system directory, then the system directories.
-func probePath(execPath string) string {
-	dirs := append([]string(nil), toolpath.SystemDirs...)
-	if execPath != "" {
-		dir := filepath.Dir(execPath)
-		if strings.ContainsAny(dir, ":\x00\n\r") {
-			// Never emit an entry that would split into several: the
-			// resolver refuses such directories, this is the backstop.
-			return strings.Join(dirs, string(os.PathListSeparator))
-		}
-		system := false
-		for _, d := range dirs {
-			if d == dir {
-				system = true
-				break
-			}
-		}
-		if !system {
-			dirs = append([]string{dir}, dirs...)
-		}
-	}
-	return strings.Join(dirs, string(os.PathListSeparator))
-}
+// probePath is the PATH of a probe; see probe.PathFor.
+func probePath(execPath string) string { return probe.PathFor(execPath) }
 
 // forcedEnv are the variables every probe gets with fixed values (PATH
 // is set per probe, see probePath).
@@ -351,32 +252,7 @@ var forcedEnv = []string{
 // rather than run from an attacker-chosen directory.
 var accountHome = resolveAccountHome()
 
-func resolveAccountHome() string {
-	if home := toolpath.AccountHome(); home != "" {
-		return home
-	}
-	return "/nonexistent"
-}
-
-// boundedWriter caps how many bytes it will actually retain; bytes
-// beyond limit are accepted (so the child is never blocked writing
-// into a full pipe, which could otherwise stall until the timeout
-// fires) but discarded. This is the defense against a broken or
-// malicious binary trying to exhaust memory through its own output.
-type boundedWriter struct {
-	buf   bytes.Buffer
-	limit int
-}
-
-func (w *boundedWriter) Write(p []byte) (int, error) {
-	if remaining := w.limit - w.buf.Len(); remaining > 0 {
-		if len(p) < remaining {
-			remaining = len(p)
-		}
-		w.buf.Write(p[:remaining])
-	}
-	return len(p), nil
-}
+func resolveAccountHome() string { return probe.AccountHome() }
 
 // parseVersion extracts a version from a tool's raw probe output, or
 // reports it as unknown ("") when the output cannot be trusted as a

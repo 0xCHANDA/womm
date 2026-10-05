@@ -10,6 +10,7 @@ import (
 
 	"github.com/0xCHANDA/womm/internal/capture"
 	"github.com/0xCHANDA/womm/internal/inspect"
+	"github.com/0xCHANDA/womm/internal/inspect/gotool"
 	nodeinspect "github.com/0xCHANDA/womm/internal/inspect/node"
 	"github.com/0xCHANDA/womm/internal/inspect/toolpath"
 	"github.com/0xCHANDA/womm/internal/report"
@@ -22,7 +23,7 @@ import (
 // through the hardened NodeInspector; same-package tests substitute
 // fakes so results never depend on what the test host has installed.
 var newInspectors = func(r *toolpath.Resolver) []inspect.Inspector {
-	return []inspect.Inspector{nodeinspect.NewNodeInspectorWith(r)}
+	return []inspect.Inspector{nodeinspect.NewNodeInspectorWith(r), gotool.NewGoInspectorWith(r)}
 }
 
 // accountHome returns the home directory the implicit version-manager

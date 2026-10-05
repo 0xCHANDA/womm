@@ -1,6 +1,6 @@
 //go:build linux
 
-package node
+package probe
 
 import (
 	"bytes"
