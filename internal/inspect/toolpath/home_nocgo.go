@@ -13,6 +13,10 @@ import (
 // maxPasswdBytes bounds the read of /etc/passwd.
 const maxPasswdBytes = 4 << 20
 
+// passwdPath is the user database; a variable only so tests can pin
+// that the lookup really reads it (and not os/user).
+var passwdPath = "/etc/passwd"
+
 // lookupHome reads the home directory of uid from /etc/passwd and
 // nowhere else. It must not use os/user here: without cgo (the release
 // binaries) both user.Current() and user.LookupId (which calls Current
@@ -21,7 +25,7 @@ const maxPasswdBytes = 4 << 20
 // images), handing the probe exactly the project-reachable value the
 // forced HOME exists to replace.
 func lookupHome(uid int) (string, bool) {
-	f, err := os.Open("/etc/passwd")
+	f, err := os.Open(passwdPath)
 	if err != nil {
 		return "", false
 	}

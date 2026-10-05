@@ -1018,3 +1018,32 @@ func TestProbePathNeverSplitsADirectory(t *testing.T) {
 		}
 	}
 }
+
+// TestAccountHomeIgnoresHostileHomeAtInit re-runs the test binary as the
+// SAME uid with a hostile HOME and USER and checks the package's
+// account home and probe environment. Unlike the passwd-less-uid test it
+// needs no root, so CI exercises it: a production binding to
+// os.Getenv("HOME") is caught here.
+func TestAccountHomeIgnoresHostileHomeAtInit(t *testing.T) {
+	if os.Getenv("WOMM_HOSTILE_HOME_CHILD") == "1" {
+		if strings.HasPrefix(accountHome, "/evil") {
+			t.Fatalf("accountHome = %q: the inherited HOME was used", accountHome)
+		}
+		for _, kv := range sanitizedEnvFor("/usr/bin/node") {
+			if strings.Contains(kv, "/evil/project") {
+				t.Errorf("hostile value reached the probe environment: %s", kv)
+			}
+		}
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(exe, "-test.run=^TestAccountHomeIgnoresHostileHomeAtInit$", "-test.v")
+	cmd.Env = []string{"WOMM_HOSTILE_HOME_CHILD=1", "HOME=/evil/project", "USER=ci", "PATH=" + os.Getenv("PATH")}
+	out, err := cmd.CombinedOutput()
+	if err != nil || !strings.Contains(string(out), "--- PASS: TestAccountHomeIgnoresHostileHomeAtInit") {
+		t.Fatalf("child: %v\n%s", err, out)
+	}
+}
