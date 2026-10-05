@@ -41,8 +41,10 @@ comparison is pure logic; reporting is presentation only.
    `Evidence` (source file, field, literal value). No requirements →
    empty slice, never an error.
 2. **Inspect (L1).** An `Inspector` acts on one `Requirement` at a time
-   and returns `core.Observation{Present, Version}`. Missing binaries
-   are observations, not errors. Unsupported tools → `ErrUnsupportedTool`.
+   and returns `core.Observation{Present, Version, Path}`; `Path` is
+   the executable that was started (empty when nothing ran) — evidence
+   shown by the report, never part of the comparison and never written
+   to `womm.yaml`. Missing binaries are observations, not errors. Unsupported tools → `ErrUnsupportedTool`.
 3. **Compare.** `compare.Compare` pairs requirement + observation into
    `core.Match` with a `MatchStatus` (`pass` / `fail` / `unreachable` /
    `unknown`) and a deterministic, human-readable `Reason`.
@@ -88,8 +90,8 @@ comparison is pure logic; reporting is presentation only.
    target is known to be present, but WOMM could not query it". The
    knowledge comes from the inspector: when the binary resolved and
    started but the probe failed (timeout, non-zero exit, exec error),
-   `Inspect` returns `Observation{Name, Present: true}` together with
-   the error. `verify` maps exactly that pair — present, same name,
+   `Inspect` returns `Observation{Name, Present: true, Path}` together
+   with the error. `verify` maps exactly that pair — present, same name,
    no version, error — to an `unreachable` match whose reason carries
    the probe failure. Compare never sees it and gains no error
    mapping; inspectors decide nothing.

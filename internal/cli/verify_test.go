@@ -326,3 +326,31 @@ func TestVerifyCommandCancelledPrintsNoVerdict(t *testing.T) {
 		t.Errorf("stderr = %q", errb.String())
 	}
 }
+
+// TestVerifyCommandShowsExecutedPath pins the user-visible half of the
+// executed-path evidence: stdout says which binary answered; the
+// partial observation of an unreachable tool still names it.
+func TestVerifyCommandShowsExecutedPath(t *testing.T) {
+	useInspector(t, stubInspector{
+		obs: map[string]core.Observation{
+			"node": {Name: "node", Present: true, Version: "24.7.0", Path: "/home/u/.volta/bin/node"},
+			"pnpm": {Name: "pnpm", Present: true, Path: "/opt/pnpm/pnpm"},
+		},
+		err: map[string]error{"pnpm": errors.New("version probe timed out after 5s")},
+	})
+	dir := t.TempDir()
+	writeWomm(t, dir, twoReqs)
+
+	code, stdout, _ := runCLI(t, "verify", dir)
+	if code != 3 {
+		t.Fatalf("exit %d, want 3 (unreachable)", code)
+	}
+	for _, want := range []string{
+		"PASS        node required >=22 <25; observed 24.7.0 at /home/u/.volta/bin/node\n",
+		"UNREACHABLE pnpm required 10.15.1; observed present at /opt/pnpm/pnpm, version unknown\n",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout lacks %q:\n%s", want, stdout)
+		}
+	}
+}

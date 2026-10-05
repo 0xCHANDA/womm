@@ -160,6 +160,11 @@ func TestDescribeObservation(t *testing.T) {
 		{core.Observation{Present: true}, "present, version unknown"},
 		{core.Observation{Present: true, Version: "24.7.0"}, "24.7.0"},
 		{core.Observation{Present: false, Version: "24.7.0"}, "absent (contradictory: version 24.7.0 reported)"},
+		// The executed path is evidence and is stated whenever known.
+		{core.Observation{Present: true, Version: "24.7.0", Path: "/usr/bin/node"}, "24.7.0 at /usr/bin/node"},
+		{core.Observation{Present: true, Path: "/usr/bin/node"}, "present at /usr/bin/node, version unknown"},
+		{core.Observation{Present: false, Version: "24.7.0", Path: "/usr/bin/node"}, "absent (contradictory: version 24.7.0 reported) at /usr/bin/node"},
+		{core.Observation{Present: false}, "absent"},
 	}
 	for _, c := range cases {
 		if got := describeObservation(c.obs); got != c.want {
@@ -305,4 +310,39 @@ func FuzzRender(f *testing.F) {
 			t.Fatalf("first line does not start with the label: %q", lines[0])
 		}
 	})
+}
+
+// TestRenderShowsExecutedPath pins where the executed binary appears and
+// that a hostile path (a tool directory name is user- or distro-chosen,
+// not trusted text) can neither add lines nor forge a status line.
+func TestRenderShowsExecutedPath(t *testing.T) {
+	m := core.Match{
+		Requirement: core.Requirement{Name: "node", Constraint: ">=22", Evidence: []core.Evidence{{Source: "package.json", Field: "engines.node", Value: ">=22"}}},
+		Observation: core.Observation{Name: "node", Present: true, Version: "24.7.0", Path: "/home/u/.volta/bin/node"},
+		Status:      core.StatusPass,
+		Reason:      "observed version satisfies the requirement",
+	}
+	var buf bytes.Buffer
+	if err := Render(&buf, []core.Match{m}); err != nil {
+		t.Fatal(err)
+	}
+	want := "PASS        node required >=22; observed 24.7.0 at /home/u/.volta/bin/node\n" +
+		"            observed version satisfies the requirement\n" +
+		"            evidence: package.json → engines.node = \">=22\"\n" +
+		"\n1 requirement: 1 pass, 0 fail, 0 unknown, 0 unreachable\n"
+	if got := buf.String(); got != want {
+		t.Errorf("Render output mismatch\n--- got ---\n%s--- want ---\n%s", got, want)
+	}
+
+	m.Observation.Path = "/tmp/x\nPASS        forged required y; observed z"
+	buf.Reset()
+	if err := Render(&buf, []core.Match{m}); err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Count(buf.String(), "\n"); lines != 5 {
+		t.Errorf("a path with a newline changed the line count to %d:\n%s", lines, buf.String())
+	}
+	if !strings.Contains(buf.String(), `\n`) || strings.Contains(buf.String(), "\nPASS        forged") {
+		t.Errorf("hostile path was not quoted:\n%s", buf.String())
+	}
 }
