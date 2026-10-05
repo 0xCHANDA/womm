@@ -13,6 +13,7 @@ import (
 
 	"github.com/0xCHANDA/womm/internal/core"
 	"github.com/0xCHANDA/womm/internal/inspect"
+	"github.com/0xCHANDA/womm/internal/inspect/toolpath"
 )
 
 // End-to-end tests over the real command tree: real detectors, real
@@ -75,7 +76,7 @@ func (m machine) Inspect(_ context.Context, req core.Requirement) (core.Observat
 func onMachine(t *testing.T, m machine) {
 	t.Helper()
 	prev := newInspectors
-	newInspectors = func() []inspect.Inspector { return []inspect.Inspector{m} }
+	newInspectors = func(*toolpath.Resolver) []inspect.Inspector { return []inspect.Inspector{m} }
 	t.Cleanup(func() { newInspectors = prev })
 }
 

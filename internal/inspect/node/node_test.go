@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/0xCHANDA/womm/internal/core"
+	"github.com/0xCHANDA/womm/internal/inspect/toolpath"
 )
 
 // --- fixtures -----------------------------------------------------
@@ -158,7 +159,7 @@ func TestInspectOnlyProbesTheRequestedTool(t *testing.T) {
 // --- PATH hijacking (adversarial) --------------------------------------
 
 // TestResolveSystemPathIgnoresHijackedProcessPATH proves — by actually
-// running the production resolveSystemPath + Inspect pipeline — that a
+// running the production resolver + Inspect pipeline — that a
 // project-controlled PATH entry placed ahead of the real system
 // directories is never resolved or executed, even though the
 // process's inherited PATH environment variable says it should win.
@@ -184,11 +185,12 @@ func TestResolveSystemPathIgnoresHijackedProcessPATH(t *testing.T) {
 	// written to in a test). Production always uses the real,
 	// hardcoded list; only the allowlist target changes here, not the
 	// resolution logic being exercised.
-	origDirs := systemPathDirs
-	systemPathDirs = []string{legitSystemDir}
-	t.Cleanup(func() { systemPathDirs = origDirs })
+	origDirs := toolpath.SystemDirs
+	toolpath.SystemDirs = []string{legitSystemDir}
+	t.Cleanup(func() { toolpath.SystemDirs = origDirs })
 
-	insp := &NodeInspector{resolvePath: resolveSystemPath, runDir: t.TempDir(), timeout: probeTimeout}
+	resolver := toolpath.System()
+	insp := &NodeInspector{resolvePath: resolver.Resolve, runDir: t.TempDir(), timeout: probeTimeout}
 	obs, err := insp.Inspect(context.Background(), core.Requirement{Name: "node"})
 	if err != nil {
 		t.Fatalf("Inspect error: %v", err)
@@ -202,15 +204,15 @@ func TestResolveSystemPathIgnoresHijackedProcessPATH(t *testing.T) {
 		t.Errorf("Inspect = %+v, want %+v (the legitimate system binary)", obs, want)
 	}
 
-	if got, err := resolveSystemPath("node"); err != nil || got != legitPath {
-		t.Errorf("resolveSystemPath(node) = (%q, %v), want (%q, nil)", got, err, legitPath)
+	if got, err := resolver.Resolve("node"); err != nil || got != legitPath {
+		t.Errorf("Resolve(node) = (%q, %v), want (%q, nil)", got, err, legitPath)
 	}
 }
 
 func TestResolveSystemPathRejectsPathLikeNames(t *testing.T) {
 	for _, name := range []string{"../../foo", "./node", "a/b", "/etc/passwd"} {
-		if _, err := resolveSystemPath(name); !errors.Is(err, errExecutableNotFound) {
-			t.Errorf("resolveSystemPath(%q) error = %v, want errExecutableNotFound", name, err)
+		if _, err := toolpath.System().Resolve(name); !errors.Is(err, errExecutableNotFound) {
+			t.Errorf("Resolve(%q) error = %v, want errExecutableNotFound", name, err)
 		}
 	}
 }
@@ -411,7 +413,7 @@ func TestSanitizedEnvStripsKeysWithoutPathCollision(t *testing.T) {
 	if !strings.Contains(joined, "WOMM_TEST_INNOCENT=keep-me") {
 		t.Errorf("innocent variable was dropped: %v", env)
 	}
-	wantPath := "PATH=" + strings.Join(systemPathDirs, string(os.PathListSeparator))
+	wantPath := "PATH=" + strings.Join(toolpath.SystemDirs, string(os.PathListSeparator))
 	found := false
 	for _, kv := range env {
 		if kv == wantPath {
@@ -605,7 +607,7 @@ func TestSanitizedEnvForcesCorepackOffline(t *testing.T) {
 	if value["COREPACK_ENABLE_NETWORK"] != "0" || value["COREPACK_ENABLE_AUTO_PIN"] != "0" || value["COREPACK_ENABLE_STRICT"] != "0" {
 		t.Errorf("Corepack switches not forced off: %v", env)
 	}
-	if value["PATH"] != strings.Join(systemPathDirs, string(os.PathListSeparator)) {
+	if value["PATH"] != strings.Join(toolpath.SystemDirs, string(os.PathListSeparator)) {
 		t.Errorf("PATH = %q, want the sanitized allowlist", value["PATH"])
 	}
 }
@@ -794,5 +796,74 @@ func TestInspectRecordsExecutedPath(t *testing.T) {
 		if obs != tc.want {
 			t.Errorf("%s: Observation = %#v, want %#v", tc.name, obs, tc.want)
 		}
+	}
+}
+
+// --- probe PATH for user-named tool directories -----------------------
+
+func TestProbePath(t *testing.T) {
+	sys := strings.Join(toolpath.SystemDirs, string(os.PathListSeparator))
+	cases := []struct{ exec, want string }{
+		{"", sys},
+		{"/usr/bin/node", sys},
+		{"/usr/local/bin/npm", sys},
+		{"/home/u/.volta/bin/node", "/home/u/.volta/bin" + string(os.PathListSeparator) + sys},
+		{"/opt/node22/bin/npm", "/opt/node22/bin" + string(os.PathListSeparator) + sys},
+	}
+	for _, tc := range cases {
+		if got := probePath(tc.exec); got != tc.want {
+			t.Errorf("probePath(%q) = %q, want %q", tc.exec, got, tc.want)
+		}
+	}
+	// The inherited PATH never leaks in, whatever the executable.
+	t.Setenv("PATH", "/evil/bin")
+	for _, e := range sanitizedEnvFor("/home/u/.volta/bin/node") {
+		if strings.HasPrefix(e, "PATH=") && strings.Contains(e, "/evil/bin") {
+			t.Errorf("inherited PATH leaked into the probe environment: %s", e)
+		}
+	}
+}
+
+// TestInspectSiblingToolsComeFromTheToolDirectory is the nvm/fnm/Volta
+// shape: npm is a launcher that finds `node` through PATH. Run from a
+// user-named directory it must see that directory's node, not whatever
+// the system directories hold — otherwise the npm observation is about
+// a mixture of two installations.
+func TestInspectSiblingToolsComeFromTheToolDirectory(t *testing.T) {
+	toolDir := t.TempDir()
+	writeFakeTool(t, toolDir, "node", "echo v24.7.0\n")
+	npm := writeFakeTool(t, toolDir, "npm", "node --version | sed 's/^v//'\n")
+
+	insp := newTestInspector(staticResolver(map[string]string{"npm": npm}), t.TempDir())
+	obs, err := insp.Inspect(context.Background(), core.Requirement{Name: "npm"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obs.Version != "24.7.0" {
+		t.Fatalf("npm observed %q; its launcher did not find the sibling node in %s", obs.Version, toolDir)
+	}
+}
+
+// TestInspectSystemBinaryKeepsTheFixedSystemPath pins that nothing
+// changes for binaries from the system directories: PATH is exactly the
+// fixed allowlist, so v0.1 behaviour is untouched.
+func TestInspectSystemBinaryKeepsTheFixedSystemPath(t *testing.T) {
+	sysDir := t.TempDir()
+	orig := toolpath.SystemDirs
+	toolpath.SystemDirs = []string{sysDir}
+	t.Cleanup(func() { toolpath.SystemDirs = orig })
+
+	marker := filepath.Join(t.TempDir(), "path")
+	tool := writeFakeTool(t, sysDir, "node", "printf %s \"$PATH\" > '"+marker+"'\necho v24.7.0\n")
+	insp := newTestInspector(staticResolver(map[string]string{"node": tool}), t.TempDir())
+	if _, err := insp.Inspect(context.Background(), core.Requirement{Name: "node"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != sysDir {
+		t.Errorf("probe PATH = %q, want exactly the system directories %q", got, sysDir)
 	}
 }
