@@ -146,14 +146,16 @@ func (n *NodeInspector) Inspect(ctx context.Context, req core.Requirement) (core
 		// was started); only the query failed. Return that knowledge
 		// as a partial observation alongside the error, so a caller
 		// can tell "present but unqueryable" (unreachable) apart
-		// from "nothing is known" — see inspect.Inspector.
-		return core.Observation{Name: req.Name, Present: true}, fmt.Errorf("inspecting %s: %w", req.Name, err)
+		// from "nothing is known" — see inspect.Inspector. The path is
+		// part of that knowledge: which binary failed to answer.
+		return core.Observation{Name: req.Name, Present: true, Path: path}, fmt.Errorf("inspecting %s: %w", req.Name, err)
 	}
 
 	return core.Observation{
 		Name:    req.Name,
 		Present: true,
 		Version: parseVersion(req.Name, out),
+		Path:    path,
 	}, nil
 }
 

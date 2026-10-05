@@ -256,3 +256,37 @@ func FuzzCompare(f *testing.F) {
 		}
 	})
 }
+
+// TestComparePathIsEvidenceNotInput pins that the executed path rides
+// along into the Match untouched and never influences the verdict: the
+// same constraint and version decide identically whatever binary the
+// version came from.
+func TestComparePathIsEvidenceNotInput(t *testing.T) {
+	cases := []struct {
+		constraint, version string
+	}{
+		{"24.7.0", "24.7.0"},
+		{"24.7.0", "24.7.1"},
+		{">=22 <25", "24.7.0"},
+		{">=22 <25", "26.0.0"},
+		{"present", ""},
+		{">=22", "24.7.0-rc.1"}, // refused (UNKNOWN) with or without a path
+		{"not a range", "24.7.0"},
+	}
+	for _, tc := range cases {
+		req := core.Requirement{Name: "node", Constraint: tc.constraint}
+		bare := core.Observation{Name: "node", Present: true, Version: tc.version}
+		withPath := bare
+		withPath.Path = "/home/u/.volta/bin/node"
+
+		want, wantErr := Compare(req, bare)
+		got, gotErr := Compare(req, withPath)
+		if got.Status != want.Status || got.Reason != want.Reason || (gotErr == nil) != (wantErr == nil) {
+			t.Errorf("%q vs %q: path changed the outcome: %q/%q/%v vs %q/%q/%v",
+				tc.constraint, tc.version, got.Status, got.Reason, gotErr, want.Status, want.Reason, wantErr)
+		}
+		if got.Observation != withPath {
+			t.Errorf("%q vs %q: Match.Observation = %#v, want it carried verbatim (%#v)", tc.constraint, tc.version, got.Observation, withPath)
+		}
+	}
+}

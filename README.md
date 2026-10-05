@@ -111,11 +111,13 @@ both modes.
 ### `womm verify` — what this machine has
 
 Loads `womm.yaml`, probes each required tool, compares, prints one
-block per requirement (sorted by name) and a summary:
+block per requirement (sorted by name) and a summary. The line states
+which executable answered (`at /usr/bin/node`) whenever one was run;
+an absent tool has no path:
 
 ```text
 $ womm verify
-FAIL        node required 24.7.0; observed 20.20.2
+FAIL        node required 24.7.0; observed 20.20.2 at /usr/bin/node
             observed version differs from the required version
             evidence: package.json → engines.node = ">=22 <25"
             evidence: .nvmrc → version = "v24.7.0"

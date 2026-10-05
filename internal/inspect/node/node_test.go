@@ -81,7 +81,7 @@ func TestInspectPresentTools(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Inspect(%s) error: %v", name, err)
 			}
-			want := core.Observation{Name: name, Present: true, Version: tc.wantVer}
+			want := core.Observation{Name: name, Present: true, Version: tc.wantVer, Path: paths[name]}
 			if obs != want {
 				t.Errorf("Inspect(%s) = %+v, want %+v", name, obs, want)
 			}
@@ -197,7 +197,7 @@ func TestResolveSystemPathIgnoresHijackedProcessPATH(t *testing.T) {
 	if _, statErr := os.Stat(marker); statErr == nil {
 		t.Fatal("malicious node_modules/.bin/node was executed (marker file exists); PATH hijack succeeded")
 	}
-	want := core.Observation{Name: "node", Present: true, Version: "9.9.9"}
+	want := core.Observation{Name: "node", Present: true, Version: "9.9.9", Path: legitPath}
 	if obs != want {
 		t.Errorf("Inspect = %+v, want %+v (the legitimate system binary)", obs, want)
 	}
@@ -388,7 +388,7 @@ func TestInspectStripsNodeOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Inspect error: %v", err)
 	}
-	if obs != (core.Observation{Name: "node", Present: true, Version: "24.7.0"}) {
+	if obs != (core.Observation{Name: "node", Present: true, Version: "24.7.0", Path: path}) {
 		t.Errorf("obs = %+v, want the plain version observation", obs)
 	}
 	if _, statErr := os.Stat(marker); statErr == nil {
@@ -550,9 +550,9 @@ func TestInspectProbeFailureReportsPresence(t *testing.T) {
 			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
 				t.Fatalf("error = %v, want %v", err, tc.wantErr)
 			}
-			want := core.Observation{Name: "npm", Present: true}
+			want := core.Observation{Name: "npm", Present: true, Path: path}
 			if obs != want {
-				t.Fatalf("Observation = %#v, want %#v (present, no version)", obs, want)
+				t.Fatalf("Observation = %#v, want %#v (present, no version, the path that failed)", obs, want)
 			}
 		})
 	}
@@ -655,7 +655,7 @@ func TestInspectReturnsEvenIfDescendantEscapesGroup(t *testing.T) {
 	if !errors.Is(err, ErrProbeTimeout) {
 		t.Fatalf("error = %v, want ErrProbeTimeout", err)
 	}
-	if obs != (core.Observation{Name: "yarn", Present: true}) {
+	if obs != (core.Observation{Name: "yarn", Present: true, Path: path}) {
 		t.Fatalf("observation = %#v, want present without version", obs)
 	}
 	if elapsed > 100*time.Millisecond+waitDelay+2*time.Second {
@@ -757,5 +757,42 @@ func TestInspectSweepsEscapeeAfterSuccessfulProbe(t *testing.T) {
 	after, _ := os.ReadFile(log)
 	if len(after) > len(before) {
 		t.Fatalf("detached descendant survived a successful probe (log grew %d -> %d bytes)", len(before), len(after))
+	}
+}
+
+// TestInspectRecordsExecutedPath pins the evidence contract of
+// core.Observation.Path: it is exactly the executable that was started
+// (never a resolved symlink target — a shim must be recorded as the
+// shim), empty when nothing was executed, and independent of whether
+// the version could be parsed.
+func TestInspectRecordsExecutedPath(t *testing.T) {
+	dir := t.TempDir()
+	good := writeFakeTool(t, dir, "node", "echo v24.7.0\n")
+	garbage := writeFakeTool(t, dir, "npm", "echo not-a-version\n")
+
+	target := writeFakeTool(t, t.TempDir(), "real-yarn", "echo 4.6.0\n")
+	shim := filepath.Join(dir, "yarn")
+	if err := os.Symlink(target, shim); err != nil {
+		t.Fatal(err)
+	}
+
+	insp := newTestInspector(staticResolver(map[string]string{"node": good, "npm": garbage, "yarn": shim}), t.TempDir())
+	cases := []struct {
+		name string
+		want core.Observation
+	}{
+		{"node", core.Observation{Name: "node", Present: true, Version: "24.7.0", Path: good}},
+		{"npm", core.Observation{Name: "npm", Present: true, Version: "", Path: garbage}},
+		{"yarn", core.Observation{Name: "yarn", Present: true, Version: "4.6.0", Path: shim}},
+		{"pnpm", core.Observation{Name: "pnpm", Present: false}},
+	}
+	for _, tc := range cases {
+		obs, err := insp.Inspect(context.Background(), core.Requirement{Name: tc.name})
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if obs != tc.want {
+			t.Errorf("%s: Observation = %#v, want %#v", tc.name, obs, tc.want)
+		}
 	}
 }

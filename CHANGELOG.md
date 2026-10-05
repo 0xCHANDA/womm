@@ -5,6 +5,15 @@ All notable changes to WOMM are recorded here. The format follows
 follow semver. No tag exists yet: the entry below is the release
 candidate content for the first tag, to be cut by a human.
 
+## [Unreleased] — v0.2 development (`integration/v0.2` only; not on `main`)
+
+### Added
+
+- `core.Observation.Path`: the absolute path of the executable that
+  produced an observation (empty when nothing ran). `verify` reports it
+  (`observed 24.7.0 at /usr/bin/node`, also for `UNREACHABLE` tools);
+  it is host evidence, never compared and never written to `womm.yaml`.
+
 ## [Unreleased] — v0.1.0 candidate (Linux + Node.js vertical slice)
 
 ### Added

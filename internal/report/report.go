@@ -138,16 +138,23 @@ func Sort(matches []core.Match) []core.Match {
 // describeObservation states what was observed, truthfully: absence,
 // presence without a version, a version, or the contradictory
 // absent-with-version case (rendered as such, never smoothed over).
+// When the observation carries the path of the executed binary it is
+// stated too ("24.7.0 at /usr/bin/node"): which binary answered is
+// evidence, not decoration.
 func describeObservation(o core.Observation) string {
+	at := ""
+	if o.Path != "" {
+		at = " at " + o.Path
+	}
 	switch {
 	case !o.Present && o.Version != "":
-		return fmt.Sprintf("absent (contradictory: version %s reported)", o.Version)
+		return fmt.Sprintf("absent (contradictory: version %s reported)%s", o.Version, at)
 	case !o.Present:
-		return "absent"
+		return "absent" + at
 	case o.Version == "":
-		return "present, version unknown"
+		return "present" + at + ", version unknown"
 	default:
-		return o.Version
+		return o.Version + at
 	}
 }
 

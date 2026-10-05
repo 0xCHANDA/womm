@@ -414,3 +414,39 @@ func FuzzExitCode(f *testing.F) {
 		}
 	})
 }
+
+// TestVerifyKeepsExecutedPathOnEveryMatch pins that the executed path
+// reaches the match whatever the verdict — including UNREACHABLE, whose
+// whole point is "this binary was there but did not answer" — and that
+// it never changes which status or exit code results.
+func TestVerifyKeepsExecutedPathOnEveryMatch(t *testing.T) {
+	const p = "/home/u/.volta/bin/"
+	insp := &fakeInspector{answers: map[string]outcome{
+		"node": {obs: core.Observation{Name: "node", Present: true, Version: "24.7.0", Path: p + "node"}},
+		"npm":  {obs: core.Observation{Name: "npm", Present: true, Version: "9.0.0", Path: p + "npm"}},
+		"yarn": {obs: core.Observation{Name: "yarn", Present: true, Path: p + "yarn"}, err: errProbe},
+		"pnpm": {obs: core.Observation{Name: "pnpm", Present: false}},
+	}}
+	res := Verify(context.Background(), file(req("node", ">=22"), req("npm", ">=10"), req("yarn", "present"), req("pnpm", "present")), []inspect.Inspector{insp})
+	if len(res.Errors) != 0 {
+		t.Fatalf("errors: %v", res.Errors)
+	}
+	want := map[string]struct {
+		status core.MatchStatus
+		path   string
+	}{
+		"node": {core.StatusPass, p + "node"},
+		"npm":  {core.StatusFail, p + "npm"},
+		"yarn": {core.StatusUnreachable, p + "yarn"},
+		"pnpm": {core.StatusFail, ""},
+	}
+	for _, m := range res.Matches {
+		w := want[m.Requirement.Name]
+		if m.Status != w.status || m.Observation.Path != w.path {
+			t.Errorf("%s: status %q path %q, want %q %q", m.Requirement.Name, m.Status, m.Observation.Path, w.status, w.path)
+		}
+	}
+	if got := ExitCode(res); got != ExitInconclusive {
+		t.Errorf("ExitCode = %d, want %d (unreachable beats fail)", got, ExitInconclusive)
+	}
+}
