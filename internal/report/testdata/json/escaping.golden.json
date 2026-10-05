@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "result": "inconclusive",
+  "exitCode": 3,
+  "requirements": [
+    {
+      "name": "nöde\"x\\",
+      "constraint": "<=1 && >2 <3",
+      "status": "unknown",
+      "reason": "tab\there\u2028sep\u0000nul��invalid-utf8 ✓",
+      "observation": {
+        "present": true,
+        "version": "1.0.0",
+        "path": "/home/ü/𝒳/node\nPASS forged"
+      },
+      "evidence": [
+        {
+          "source": "pa\"ckage.json",
+          "field": "a\\b",
+          "value": "line1\nline2\r\n\u001b[31mred\u001b[0m"
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "summary": {
+    "total": 1,
+    "pass": 0,
+    "fail": 0,
+    "unknown": 1,
+    "unreachable": 0
+  }
+}

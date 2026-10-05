@@ -39,9 +39,26 @@ type exitCodeError struct{ code int }
 
 func (e *exitCodeError) Error() string { return fmt.Sprintf("exit %d", e.code) }
 
+// diagnostics converts operational errors into the report's neutral
+// form, classified by sentinel (never by text).
+func diagnostics(errs []error) []report.Diagnostic {
+	out := make([]report.Diagnostic, 0, len(errs))
+	for _, e := range errs {
+		out = append(out, report.Diagnostic{Kind: verify.ErrorKind(e), Message: e.Error()})
+	}
+	return out
+}
+
+// Output formats of `verify`.
+const (
+	formatHuman = "human"
+	formatJSON  = "json"
+)
+
 func newVerifyCmd() *cobra.Command {
 	var file string
 	var toolDirs []string
+	var format string
 	cmd := &cobra.Command{
 		Use:   "verify [project-dir]",
 		Short: "Check this machine against the project's womm.yaml",
@@ -60,9 +77,16 @@ func newVerifyCmd() *cobra.Command {
 			"inherited PATH. A --tool-dir inside the project, under a " +
 			"node_modules or world-writable is refused; one owned by another " +
 			"user is accepted with a warning. An unsafe account directory " +
-			"is skipped with a warning.",
+			"is skipped with a warning.\n\n" +
+			"--format json prints one JSON document (schema version 1, " +
+			"docs/output-json.md) on stdout instead of the report; exit " +
+			"status and stderr are identical in both formats.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if format != formatHuman && format != formatJSON {
+				// A bad flag value is a usage error (exit 2), before anything runs.
+				return fmt.Errorf("invalid argument %q for \"--format\" flag: must be %q or %q", format, formatHuman, formatJSON)
+			}
 			root := "."
 			if len(args) == 1 {
 				root = args[0]
@@ -113,8 +137,20 @@ func newVerifyCmd() *cobra.Command {
 				cmd.SilenceErrors = true
 				return &exitCodeError{code: verify.ExitInconclusive}
 			}
-			if err := report.Render(cmd.OutOrStdout(), res.Matches); err != nil {
-				return err
+			var renderErr error
+			switch format {
+			case formatJSON:
+				renderErr = report.RenderJSON(cmd.OutOrStdout(), report.JSONDocument{
+					Result:      verify.Verdict(res),
+					ExitCode:    verify.ExitCode(res),
+					Matches:     res.Matches,
+					Diagnostics: diagnostics(res.Errors),
+				})
+			default:
+				renderErr = report.Render(cmd.OutOrStdout(), res.Matches)
+			}
+			if renderErr != nil {
+				return renderErr
 			}
 			for _, e := range res.Errors {
 				fmt.Fprintf(cmd.ErrOrStderr(), "error: %v\n", e)
@@ -130,6 +166,7 @@ func newVerifyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "womm.yaml to verify (default: <project-dir>/womm.yaml)")
+	cmd.Flags().StringVar(&format, "format", formatHuman, "output format: \"human\" or \"json\" (one JSON document on stdout; see docs/output-json.md)")
 	cmd.Flags().StringArrayVar(&toolDirs, "tool-dir", nil, "absolute directory to resolve tools from, before the system directories (repeatable; e.g. a version manager's bin directory)")
 	return cmd
 }

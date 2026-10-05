@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "result": "inconclusive",
+  "exitCode": 3,
+  "requirements": [
+    {
+      "name": "npm",
+      "constraint": ">=10",
+      "status": "unknown",
+      "reason": "target is present but its version is unknown",
+      "observation": {
+        "present": true,
+        "version": null,
+        "path": "/usr/bin/npm"
+      },
+      "evidence": [
+        {
+          "source": "package.json",
+          "field": "engines.npm",
+          "value": ">=10"
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "summary": {
+    "total": 1,
+    "pass": 0,
+    "fail": 0,
+    "unknown": 1,
+    "unreachable": 0
+  }
+}

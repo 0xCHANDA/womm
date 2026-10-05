@@ -156,6 +156,17 @@ that failed before the tool was even found) are printed on stderr as
 observed version, prerelease against a range) keeps its status line
 on stdout *and* echoes the detail as an `error: …` line on stderr.
 
+#### Machine-readable output
+
+`womm verify --format json` prints one JSON document on stdout instead
+of the report (schema version 1, `docs/output-json.md`): requirements
+with status, reason, observation (including the executed `path`) and
+evidence, the operational errors, and a summary. The document is
+deterministic (no timestamps, host names or identifiers); the exit code
+and everything on stderr are identical to the default format. When
+nothing was verified (usage error, missing or malformed `womm.yaml`,
+interrupted run) stdout stays empty — check the exit code first.
+
 ### Constraint semantics
 
 - `present` — the tool must exist; version ignored.

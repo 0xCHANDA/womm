@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "result": "inconclusive",
+  "exitCode": 3,
+  "requirements": [],
+  "errors": [
+    {
+      "kind": "unsupported_requirement",
+      "message": "service \"postgres\": no inspector supports requirement (services are not verified by WOMM v0.1)"
+    }
+  ],
+  "summary": {
+    "total": 0,
+    "pass": 0,
+    "fail": 0,
+    "unknown": 0,
+    "unreachable": 0
+  }
+}

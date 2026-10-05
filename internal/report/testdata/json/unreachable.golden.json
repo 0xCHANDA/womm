@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "result": "inconclusive",
+  "exitCode": 3,
+  "requirements": [
+    {
+      "name": "yarn",
+      "constraint": "present",
+      "status": "unreachable",
+      "reason": "target is present but could not be queried: inspecting yarn: version probe timed out after 5s",
+      "observation": {
+        "present": true,
+        "version": null,
+        "path": "/usr/local/bin/yarn"
+      },
+      "evidence": [
+        {
+          "source": "package.json",
+          "field": "packageManager",
+          "value": "yarn@4.0.0"
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "summary": {
+    "total": 1,
+    "pass": 0,
+    "fail": 0,
+    "unknown": 0,
+    "unreachable": 1
+  }
+}

@@ -450,3 +450,60 @@ func TestVerifyKeepsExecutedPathOnEveryMatch(t *testing.T) {
 		t.Errorf("ExitCode = %d, want %d (unreachable beats fail)", got, ExitInconclusive)
 	}
 }
+
+func TestErrorKindPerSentinel(t *testing.T) {
+	wrap := func(e error) error { return fmt.Errorf("node: %w", e) }
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{ErrUnsupportedRequirement, KindUnsupportedRequirement},
+		{wrap(ErrUnsupportedRequirement), KindUnsupportedRequirement},
+		{wrap(fmt.Errorf("%w: %w", ErrInspectionFailed, errors.New("boom"))), KindInspectionFailed},
+		{compare.ErrNameMismatch, KindUndecidable},
+		{wrap(compare.ErrInconsistentObservation), KindUndecidable},
+		{wrap(compare.ErrInvalidConstraint), KindUndecidable},
+		{wrap(compare.ErrInvalidObservedVersion), KindUndecidable},
+		{wrap(compare.ErrPrereleaseRange), KindUndecidable},
+		{context.Canceled, KindCancelled},
+		{wrap(context.DeadlineExceeded), KindCancelled},
+		{errors.New("something else"), KindOther},
+		{nil, KindOther},
+	}
+	for _, c := range cases {
+		if got := ErrorKind(c.err); got != c.want {
+			t.Errorf("ErrorKind(%v) = %q, want %q", c.err, got, c.want)
+		}
+	}
+	// The codes are public (docs/output-json.md): their text is a contract.
+	for got, want := range map[string]string{
+		KindUnsupportedRequirement: "unsupported_requirement", KindInspectionFailed: "inspection_failed",
+		KindUndecidable: "undecidable", KindCancelled: "cancelled", KindOther: "other",
+	} {
+		if got != want {
+			t.Errorf("kind constant %q, want %q", got, want)
+		}
+	}
+}
+
+func TestVerdictMatchesExitCode(t *testing.T) {
+	pass := core.Match{Status: core.StatusPass}
+	fail := core.Match{Status: core.StatusFail}
+	unk := core.Match{Status: core.StatusUnknown}
+	cases := []struct {
+		r    Result
+		want string
+	}{
+		{Result{}, "pass"},
+		{Result{Matches: []core.Match{pass}}, "pass"},
+		{Result{Matches: []core.Match{pass, fail}}, "fail"},
+		{Result{Matches: []core.Match{fail, unk}}, "inconclusive"},
+		{Result{Matches: []core.Match{fail}, Errors: []error{errors.New("x")}}, "inconclusive"}, // 3 beats 1
+		{Result{Errors: []error{errors.New("x")}}, "inconclusive"},
+	}
+	for _, c := range cases {
+		if got := Verdict(c.r); got != c.want {
+			t.Errorf("Verdict = %q, want %q (ExitCode %d)", got, c.want, ExitCode(c.r))
+		}
+	}
+}
